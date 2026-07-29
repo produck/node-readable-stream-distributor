@@ -15,21 +15,36 @@
   → register({ label }) → { stream, unregister() }
   → 每个拷贝流独立消费
   → 任一拷贝 cancel 不影响其他
-  → 当且仅当所有拷贝都 unregister
+  → 拷贝消费完毕（done）或 cancel 均自动清理引用
+  → unregister() 仅用于主动提前终止
+  → 当且仅当所有拷贝都离开
   → 主入口流 reader.cancel() / releaseLock()
 ```
 
 ## API
 
+`ReadableStreamDistributor` 是抽象类。下游实现 `highWaterMark`
+getter 提供阈值策略。
+
+构造条件：`source` 必须未被锁定（`source.locked === false`），
+否则拒绝构造。
+
 ```js
 import { ReadableStreamDistributor } from '@produck/readable-stream-distributor';
 
-const distributor = new ReadableStreamDistributor(source, {
-  highWaterMark, // 内存 chunk 数阈值，超过后溢出到文件
-  tmpdir: os.tmpdir(), // 临时文件目录
-});
+class MyDistributor extends ReadableStreamDistributor {
+  get highWaterMark() {
+    // 下游自行决定：静态值、配置读取、运行时动态计算均可
+    return this.config.maxBufferSize ?? os.freemem();
+  }
+}
+
+const distributor = new MyDistributor(source);
+
+// 注意：一旦溢出到磁盘后，highWaterMark 不再被查询（单向门）
 
 const copy = distributor.register({ label: 'sha1-checker' });
+// label：助记符，用于事件和统计中标识拷贝，不作唯一性约束
 // → { stream: ReadableStream, unregister(): void }
 
 // 正常消费
@@ -39,11 +54,20 @@ while (true) {
   if (done) break;
 }
 
-// 提前终止——不影响其他拷贝
+// 提前终止——不影响其他拷贝（正常消费完毕无需手动调用）
 copy.unregister();
 
-// 消费者 cancel 自己的 stream 也会自动 unregister
+// 消费者 cancel 自己的 stream 也会自动清理引用
 reader.cancel();
+
+// 强制销毁（框架层策略执行：body 超限、请求超时、客户端断开等）
+// 与错误传播同模式——延迟暴露，不对拷贝搞突袭：
+// 分发器标记为已销毁 → 不再从 source 拉取新 chunk
+// → 各拷贝照常消费已缓冲数据 → 耗尽后 stream error
+// → error 为可辨识类型（如 AbortError），下游可据此区分
+//    意外终止（source error）与策略截断（destroy）
+// → 关闭文件 → 释放 source reader → 分发器不可再用
+distributor.destroy();
 ```
 
 ## 架构
@@ -68,7 +92,7 @@ graph TD
     COPY_B --> CONSUMER_B["消费者 B"]
     COPY_N --> CONSUMER_N["消费者 N"]
 
-    BROADCAST -- "任一拷贝满 →<br/>暂停 source.read()" --> SOURCE
+    BUFFER -- "满且 flush 未完成 →<br/>暂停 source.read()" --> SOURCE
     COPY_A -- "unregister" --> COUNTER{"活跃计数 -1"}
     COPY_B -- "unregister" --> COUNTER
     COUNTER -- "归零 → reader.cancel()" --> SOURCE
@@ -76,12 +100,12 @@ graph TD
 
 ### 模块
 
-| 模块                        | 职责                                  |
-| --------------------------- | ------------------------------------- |
-| `ReadableStreamDistributor` | 源流 → 多拷贝分发，引用计数，策略切换 |
-| `BufferReader`              | 内存阶段——从 `Buffer[]` 按 index 读取 |
-| `FileReader`                | 文件阶段——从 chunk 文件按游标读取     |
-| chunk 文件格式              | `[4B len][chunk data]...` 自描述序列  |
+| 模块                        | 职责                                                               |
+| --------------------------- | ------------------------------------------------------------------ |
+| `ReadableStreamDistributor` | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现 |
+| `BufferReader`              | 内存阶段——从 `Buffer[]` 按 index 读取                              |
+| `FileReader`                | 文件阶段——从 chunk 文件按游标读取                                  |
+| chunk 文件格式              | `[4B len][chunk data]...` 自描述序列                               |
 
 ## 缓存文件格式
 
@@ -115,6 +139,9 @@ title Chunk 文件格式
 
 切换文件时，先将 `Buffer[]` 内容按文件格式写入，清空数组，
 后续 chunk 直接走文件。
+
+内存→磁盘是单向门：一旦切换，`highWaterMark` 后续变化不再
+生效——木已成舟，不再回头。
 
 ## Chunk 读取器
 
@@ -221,8 +248,20 @@ sequenceDiagram
 
 ## 背压
 
-广播前检查所有拷贝的 `controller.desiredSize`。任一 ≤ 0
-则暂停 `source.read()`，等 `pull` 回调唤醒。
+source 按最快速率拉取。慢消费者不阻塞 source——它走 FileReader
+从磁盘回放即可。
+
+背压点只有一个：`Buffer[]` 已满且上一次磁盘 flush 尚未完成时，
+暂停 `source.read()`，flush 完成后恢复。即**磁盘写入带宽决定速率**。
+
+这不仅是性能策略，更是稳定性策略。source 通常是网络通道（如 HTTP
+请求体），尽快读完意味着：
+
+- **缩短连接生命周期**：TCP 连接更快进入 CLOSE 或复用状态，减少
+  代理超时、客户端超时、负载均衡器断开的风险窗口
+- **数据先行落盘**：将数据从脆弱的网络通道尽快转移到稳定存储，
+  即使后续处理出错，数据仍在，可重试、可审计、可恢复
+- **减少攻击面**：拖着不读的连接是敞开的资源消耗点
 
 ## 依赖
 
@@ -233,6 +272,80 @@ sequenceDiagram
 - `node:os`（`tmpdir`）
 - `node:path`（`join`）
 - `node:crypto`（`randomBytes`——临时文件名）
+
+## 待定
+
+### 错误传播
+
+source 出错后，分发器标记为错误状态，但该错误对每个拷贝**延迟暴露**——
+各拷贝先正常消费自己进度之后的已缓冲 chunk，耗尽后才 `error`。新
+`register()` 亦然：有已缓冲数据则先消费，耗尽后 error。
+
+这保证每个拷贝拿到的始终是连续完整前缀（不会跳号、不会缺中间块），
+且"来晚了"的拷贝也能利用已缓冲数据完成部分工作。
+
+`destroy()` 走相同路径，但 error 类型可辨识（如 `AbortError`）：
+下游不关心原因时直接忽略即可，需要区分时检查 `error.name`。
+对拷贝流而言，source error 和 destroy 都是"流没走完"——异常管理
+路径统一即可。
+
+### 临时文件清理
+
+临时文件清理策略继续搁置，实现时再定。
+
+## 已知风险与可观测性
+
+以下风险源于"数据与 exchange 生命周期解耦"的架构取舍，模块不替
+调用方做强制策略，但提供可观测性信号：
+
+- **悬空拷贝**：后处理拷贝出错或 hang 住时，HTTP 响应已发，无 channel
+  回报状态
+- **磁盘空间累积**：并发请求 × 慢拷贝消费时长 × 数据量 = 峰值磁盘
+  占用
+- **未 unregister 导致泄漏**：消费者既没 cancel 也没调 unregister
+  且持有引用不释放时，文件描述符无法回收、磁盘文件无法删除
+
+模块通过事件机制提供感知能力：当拷贝存活时间或落后程度超过阈值
+时触发 `warn` 事件。默认策略为 `console.warn`，调用方可替换为
+自定义处理器（接入日志系统、监控报警等）。这是提示而非强
+制——若下游确实需要长时间后处理，忽略该事件即可。
+
+### 纯内存模式
+
+下游在 `get highWaterMark()` 中返回 `Number.MAX_SAFE_INTEGER`
+即可事实上禁用磁盘溢出。
+
+## 可观测性
+
+### 生命周期事件
+
+分发过程各节点均暴露事件，下游可零侵入接入日志与监控：
+
+| 事件                | 含义                                   |
+| ------------------- | -------------------------------------- |
+| `copy:registered`   | 新拷贝上线，携带 `label`               |
+| `copy:done`         | 拷贝正常消费完毕，自动清理             |
+| `copy:cancelled`    | 拷贝被 cancel                          |
+| `copy:unregistered` | 显式调用 unregister                    |
+| `source:done`       | 源流正常结束                           |
+| `source:error`      | 源流出错                               |
+| `all:empty`         | 所有拷贝离开，分发器释放               |
+| `destroy`           | 强制销毁，拷贝耗尽已缓冲数据后 → error |
+
+### 统计
+
+只读 `stats` 对象，实现成本极低：
+
+```js
+distributor.stats  // →
+{
+  bytesBuffered,   // 当前 Buffer[] 字节数
+  bytesWritten,    // 已写入磁盘总字节数
+  totalChunks,     // 已处理 chunk 数
+  activeCopies,    // 当前活跃拷贝数
+  peakCopies,      // 历史峰值拷贝数
+}
+```
 
 ## 非目标
 
