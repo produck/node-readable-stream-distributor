@@ -1,0 +1,34 @@
+{
+  "devDependencies": {
+    "@eslint/config-helpers": "0.7.0",
+    "@eslint/js": "10.0.1",
+    "@eslint/json": "2.0.1",
+    "@eslint/markdown": "8.0.3",
+    "@produck/agent-toolkit": "0.11.2",
+    "@produck/eslint-rules": "0.4.2",
+    "c8": "12.0.0",
+    "eslint": "10.7.0",
+    "globals": "17.7.0",
+    "husky": "9.1.7",
+    "lerna": "9.0.7",
+    "prettier": "3.9.6",
+    "typescript-eslint": "8.65.0"
+  },
+  "name": "@produck/readable-stream-distributor-workspace",
+  "private": true,
+  "scripts": {
+    "prepare": "husky",
+    "produck:baseline": "npm exec --package=@produck/agent-toolkit@latest -- agent-toolkit enforce-node-baseline --cwd . && npm run produck:install",
+    "produck:commit:check": "npm run produck:format && npm run produck:lint",
+    "produck:coverage": "c8 --config .c8rc.json npm run test --workspaces --if-present",
+    "produck:format": "prettier --write . --ignore-path .prettierignore --ignore-path .gitignore",
+    "produck:install": "npm -v && npm install",
+    "produck:lint": "eslint --fix . --max-warnings=0",
+    "produck:publish": "npm run produck:publish:check && npm run publish --",
+    "produck:publish:check": "npm run produck:install && npm run produck:coverage && npm run produck:commit:check",
+    "publish": "lerna publish"
+  },
+  "workspaces": [
+    "packages/main"
+  ]
+}

@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# Windows script entrypoints
+*.bat text eol=crlf
+*.cmd text eol=crlf

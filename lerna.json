@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/lerna/schemas/lerna-schema.json",
+  "command": {
+    "publish": {
+      "ignoreScripts": false,
+      "message": "[PUBLISH]"
+    },
+    "version": {
+      "commitHooks": false
+    }
+  },
+  "useNx": false,
+  "version": "independent"
+}

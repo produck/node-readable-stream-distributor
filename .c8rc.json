@@ -1,0 +1,20 @@
+{
+  "branches": 99.5,
+  "check-coverage": true,
+  "exclude": [
+    "**/node_modules/**",
+    "**/coverage/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/out/**",
+    "**/test/**"
+  ],
+  "functions": 99.5,
+  "lines": 99.5,
+  "reporter": [
+    "lcov",
+    "html",
+    "text-summary"
+  ],
+  "statements": 99.5
+}

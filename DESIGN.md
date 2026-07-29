@@ -10,7 +10,7 @@
 
 ## 核心语义
 
-```
+```text
 主入口流（唯一真实来源）
   → register({ label }) → { stream, unregister() }
   → 每个拷贝流独立消费
@@ -25,8 +25,8 @@
 import { ReadableStreamDistributor } from '@produck/readable-stream-distributor';
 
 const distributor = new ReadableStreamDistributor(source, {
-  highWaterMark,            // 内存 chunk 数阈值，超过后溢出到文件
-  tmpdir: os.tmpdir(),      // 临时文件目录
+  highWaterMark, // 内存 chunk 数阈值，超过后溢出到文件
+  tmpdir: os.tmpdir(), // 临时文件目录
 });
 
 const copy = distributor.register({ label: 'sha1-checker' });
@@ -76,12 +76,12 @@ graph TD
 
 ### 模块
 
-| 模块 | 职责 |
-|---|---|
+| 模块                        | 职责                                  |
+| --------------------------- | ------------------------------------- |
 | `ReadableStreamDistributor` | 源流 → 多拷贝分发，引用计数，策略切换 |
-| `BufferReader` | 内存阶段——从 `Buffer[]` 按 index 读取 |
-| `FileReader` | 文件阶段——从 chunk 文件按游标读取 |
-| chunk 文件格式 | `[4B len][chunk data]...` 自描述序列 |
+| `BufferReader`              | 内存阶段——从 `Buffer[]` 按 index 读取 |
+| `FileReader`                | 文件阶段——从 chunk 文件按游标读取     |
+| chunk 文件格式              | `[4B len][chunk data]...` 自描述序列  |
 
 ## 缓存文件格式
 
@@ -210,11 +210,11 @@ sequenceDiagram
     A-->>A: ✅ 职责结束
 ```
 
-| 事件 | 活跃拷贝数 |
-|---|---|
-| 分发器启动，注册拷贝 A、B | 2 |
-| B cancel → unregister | **1** |
-| A 消费完毕 → unregister | **0 → source.reader.cancel()** |
+| 事件                      | 活跃拷贝数                     |
+| ------------------------- | ------------------------------ |
+| 分发器启动，注册拷贝 A、B | 2                              |
+| B cancel → unregister     | **1**                          |
+| A 消费完毕 → unregister   | **0 → source.reader.cancel()** |
 
 任一拷贝 cancel 不影响其他。最后一个拷贝离开时源头
 才被释放。这就是"全停则全停"。
