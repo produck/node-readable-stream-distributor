@@ -23,8 +23,11 @@
 
 ## API
 
-`ReadableStreamDistributor` 是抽象类。下游实现 `highWaterMark`
-getter 提供阈值策略。
+`ReadableStreamDistributor` 提供默认实现，下游按需覆盖。
+
+- `get highWaterMark()` → `os.freemem()`
+- `get tmpdir()` → `os.tmpdir()`（实时读环境变量 `TMPDIR`，
+  运维可在线调整，无需重启进程）
 
 构造条件：`source` 必须未被锁定（`source.locked === false`），
 否则拒绝构造。
@@ -32,13 +35,18 @@ getter 提供阈值策略。
 ```js
 import { ReadableStreamDistributor } from '@produck/readable-stream-distributor';
 
+// 零覆盖：全部默认即可用
+const distributor = new ReadableStreamDistributor(source);
+
+// 或按需覆盖
 class MyDistributor extends ReadableStreamDistributor {
   get highWaterMark() {
-    // 下游自行决定：静态值、配置读取、运行时动态计算均可
-    return this.config.maxBufferSize ?? os.freemem();
+    return this.config.maxBufferSize ?? super.highWaterMark;
+  }
+  get tmpdir() {
+    return this.config.tmpdir ?? super.tmpdir;
   }
 }
-
 const distributor = new MyDistributor(source);
 
 // 注意：一旦溢出到磁盘后，highWaterMark 不再被查询（单向门）
@@ -269,7 +277,7 @@ source 按最快速率拉取。慢消费者不阻塞 source——它走 FileRead
 
 - `node:fs`（`fs.open`、`fileHandle.read`、`fileHandle.write`）
 - `node:stream/web`（`ReadableStream`）
-- `node:os`（`tmpdir`）
+- `node:os`（`freemem`、`tmpdir`）
 - `node:path`（`join`）
 - `node:crypto`（`randomBytes`——临时文件名）
 
