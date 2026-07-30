@@ -1,26 +1,33 @@
-/**
- * ReadableStreamDistributor tests
- */
-
+import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+
 import { ReadableStreamDistributor } from '../src/index.mjs';
-
-void ReadableStreamDistributor;
-
-// ── Construction ──────────────────────────────────────────
 
 describe('ReadableStreamDistributor', () => {
   describe('constructor', () => {
     it('should reject a locked source', () => {
-      // TODO: construct a locked source and verify rejection
+      const source = new ReadableStream({
+        start(controller) { controller.close(); },
+      });
+
+      const reader = source.getReader();
+
+      assert.throws(
+        () => new ReadableStreamDistributor(source),
+        /must not be locked/,
+      );
+
+      reader.releaseLock();
     });
 
     it('should accept an unlocked source', () => {
-      // TODO: construct an unlocked source and verify success
+      const source = new ReadableStream({
+        start(controller) { controller.close(); },
+      });
+
+      assert.doesNotThrow(() => new ReadableStreamDistributor(source));
     });
   });
-
-  // ── Properties ──────────────────────────────────────────
 
   describe('::highWaterMark', () => {
     it('should return a positive number by default', () => {
@@ -41,8 +48,6 @@ describe('ReadableStreamDistributor', () => {
       // TODO
     });
   });
-
-  // ── register ────────────────────────────────────────────
 
   describe('.register()', () => {
     it('should return a stream and unregister function', () => {
@@ -90,8 +95,6 @@ describe('ReadableStreamDistributor', () => {
     });
   });
 
-  // ── destroy ─────────────────────────────────────────────
-
   describe('.destroy()', () => {
     it('should stop pulling from source', () => {
       // TODO
@@ -105,8 +108,6 @@ describe('ReadableStreamDistributor', () => {
       // TODO: stream errors after buffered data is exhausted
     });
   });
-
-  // ── Memory → file phase transition ─────────────────────
 
   describe('memory → file phase transition', () => {
     it('should switch to file when buffer exceeds highWaterMark', () => {
@@ -125,8 +126,6 @@ describe('ReadableStreamDistributor', () => {
       // TODO: slow consumers catch up from file
     });
   });
-
-  // ── Edge cases ──────────────────────────────────────────
 
   describe('edge cases', () => {
     it('should handle empty source stream', () => {
