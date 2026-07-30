@@ -34,26 +34,56 @@ describe('ReadableStreamDistributor', () => {
   });
 
   describe('::highWaterMark', () => {
-    it('should return a positive number by default', () => {
-      // TODO
+    it('should delegate to new.target static method', () => {
+      const source = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
+
+      const dist = new ReadableStreamDistributor(source);
+
+      assert.equal(
+        dist.highWaterMark,
+        ReadableStreamDistributor.highWaterMark(),
+      );
     });
 
-    it('should be overridable by subclass', () => {
-      // TODO
+    it('should respect subclass static override', () => {
+      const source = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
+
+      class Sub extends ReadableStreamDistributor {
+        static highWaterMark() {
+          return 1024;
+        }
+      }
+
+      const dist = new Sub(source);
+
+      assert.equal(dist.highWaterMark, 1024);
+      assert.equal(Sub.highWaterMark(), 1024);
     });
   });
 
   describe('::tmpdir', () => {
-    it('should return a string by default', () => {
-      // TODO
-    });
+    it('should delegate to new.target static method', () => {
+      const source = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
 
-    it('should respect TMPDIR env var', () => {
-      // TODO
+      const dist = new ReadableStreamDistributor(source);
+
+      assert.equal(dist.tmpdir, ReadableStreamDistributor.tmpdir());
     });
   });
 
-  describe('.register()', () => {
+  describe('.fork()', () => {
     it('should return a stream and unregister function', () => {
       // TODO
     });

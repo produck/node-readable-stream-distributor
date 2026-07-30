@@ -1,5 +1,5 @@
 import ChunkReader from './chunk-reader.mjs';
-import { IReader } from './Symbol.mjs';
+import { _IReader } from './Symbol.mjs';
 
 const $fileHandle = Symbol('.$fileHandle');
 const $position = Symbol('.$position');
@@ -23,7 +23,7 @@ export class FileReader extends ChunkReader {
     this[$chunksRead] = 0;
   }
 
-  async [IReader.READ]() {
+  async [_IReader.READ]() {
     if (this[$chunksRead] >= this[$committedChunks]) {
       return { done: true };
     }

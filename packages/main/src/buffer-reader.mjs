@@ -1,5 +1,5 @@
 import ChunkReader from './chunk-reader.mjs';
-import { IReader } from './Symbol.mjs';
+import { _IReader } from './Symbol.mjs';
 
 const $buffer = Symbol('.$buffer');
 const $index = Symbol('.$index');
@@ -15,7 +15,7 @@ export class BufferReader extends ChunkReader {
     this[$index] = startIndex;
   }
 
-  async [IReader.READ]() {
+  async [_IReader.READ]() {
     // TODO: implement — return buffer[this[$index]++] if available,
     // otherwise return { done: true } to signal "not ready yet"
     throw new Error('Not implemented');
