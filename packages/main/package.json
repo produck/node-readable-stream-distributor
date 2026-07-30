@@ -2,9 +2,13 @@
   "bugs": {
     "url": "https://github.com/produck/node-readable-stream-distributor/issues"
   },
+  "dependencies": {
+    "@produck/deep-freeze-enumerable": "^1.1.1",
+    "@produck/es-abstract": "^0.3.3"
+  },
   "description": "Distribute a single Node.js ReadableStream to multiple independent consumers, each receiving a complete copy with isolated progress.",
   "exports": {
-    ".": "./src/index.mjs"
+    ".": "./src/Distributor.mjs"
   },
   "homepage": "https://github.com/produck/node-readable-stream-distributor/tree/main/packages/main#readme",
   "keywords": [
@@ -16,7 +20,7 @@
     "broadcast"
   ],
   "license": "MIT",
-  "main": "./src/index.mjs",
+  "main": "./src/Distributor.mjs",
   "name": "@produck/readable-stream-distributor",
   "repository": {
     "directory": "packages/main",

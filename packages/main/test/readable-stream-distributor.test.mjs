@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ReadableStreamDistributor } from '../src/index.mjs';
+import { ReadableStreamDistributor } from '../src/Distributor.mjs';
 
 describe('ReadableStreamDistributor', () => {
   describe('constructor', () => {
     it('should reject a locked source', () => {
       const source = new ReadableStream({
-        start(controller) { controller.close(); },
+        start(controller) {
+          controller.close();
+        },
       });
 
       const reader = source.getReader();
@@ -22,7 +24,9 @@ describe('ReadableStreamDistributor', () => {
 
     it('should accept an unlocked source', () => {
       const source = new ReadableStream({
-        start(controller) { controller.close(); },
+        start(controller) {
+          controller.close();
+        },
       });
 
       assert.doesNotThrow(() => new ReadableStreamDistributor(source));

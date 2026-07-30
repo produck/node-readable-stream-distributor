@@ -36,7 +36,7 @@ export function createChunkReader(distributor) {
   }
 
   // TODO: implement
-  // import { $ } from '../symbol.mjs';
+  // import { $IDistributor as $ } from '../Symbol.mjs';
   // if (distributor[$.inFilePhase]) {
   //   return new FileReaderModule.FileReader(
   //     distributor[$.fileHandle], 0, distributor[$.committedChunks]);
