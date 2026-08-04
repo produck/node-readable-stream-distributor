@@ -1,8 +1,9 @@
 import * as os from 'node:os';
 
 import { IDistributor as I } from './Symbol.mjs';
+import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 
-export class ReadableStreamDistributor {
+export default class ReadableStreamDistributor {
   static highWaterMark() {
     return os.freemem();
   }
@@ -55,8 +56,20 @@ export class ReadableStreamDistributor {
       throw new Error('Distributor has been destroyed');
     }
 
-    // TODO: implement
-    throw new Error('Not implemented');
+    const copy = new ForkedReadableStream.Final({
+      label: options.label,
+      distributor: this,
+    });
+
+    this[I.COPIES].add(copy);
+
+    // TODO: create underlying ReadableStream and assign to copy[I.STREAM]
+    // copy[I.STREAM] = new ReadableStream({
+    //   pull: async (controller) => { ... },
+    //   cancel: () => { copy.unregister(); },
+    // });
+
+    return copy;
   }
 
   destroy() {
