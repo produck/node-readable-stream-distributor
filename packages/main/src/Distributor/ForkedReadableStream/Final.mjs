@@ -2,35 +2,40 @@ import { IDistributor as ID } from '../Symbol.mjs';
 
 import { IForkedReadableStream as I } from './Symbol.mjs';
 
-export default class ForkedReadableStream {
-  /** @param {{ label: string, distributor: import('../Abstract.mjs').default }} options */
-  constructor(options) {
-    this[I.LABEL] = options.label;
-    this[I.DISTRIBUTOR] = options.distributor;
-    this[I.STREAM] = null;
-    this[I.CONTROLLER] = null;
-    this[I.READER] = null;
-    this[I.CONSUMED] = 0;
-    this[I.CANCELLED] = false;
-    this[I.DONE] = false;
-  }
+export default class ForkedReadableStream extends ReadableStream {
+  [I.LABEL];
+  [I.DISTRIBUTOR];
+  [I.CONTROLLER];
+  [I.CONSUMED] = 0;
+  [I.CANCELLED] = false;
+  [I.DONE] = false;
 
-  get label() {
-    return this[I.LABEL];
-  }
+  /**
+   * @param {import('../Abstract.mjs').default} distributor
+   * @param {string} label
+   */
+  constructor(distributor, label) {
+    super({
+      start: (controller) => {
+        this[I.CONTROLLER] = controller;
+      },
+      pull: async (controller) => {
+        void controller;
+        // TODO: pull chunk from distributor and enqueue
+      },
+      cancel: () => {
+        if (this[I.CANCELLED]) {
+          return;
+        }
 
-  get stream() {
-    return this[I.STREAM];
-  }
+        this[I.CANCELLED] = true;
+        this[I.DISTRIBUTOR][ID.COPIES].delete(this);
 
-  unregister() {
-    if (this[I.CANCELLED]) {
-      return;
-    }
+        // TODO: if all copies gone → cancel source reader
+      },
+    });
 
-    this[I.CANCELLED] = true;
-    this[I.DISTRIBUTOR][ID.COPIES].delete(this);
-
-    // TODO: if all copies gone → cancel source reader
+    this[I.LABEL] = label;
+    this[I.DISTRIBUTOR] = distributor;
   }
 }

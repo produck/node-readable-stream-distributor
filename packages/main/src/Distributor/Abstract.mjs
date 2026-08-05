@@ -56,18 +56,9 @@ export default class ReadableStreamDistributor {
       throw new Error('Distributor has been destroyed');
     }
 
-    const copy = new ForkedReadableStream.Final({
-      label: options.label,
-      distributor: this,
-    });
+    const copy = new ForkedReadableStream.Final(this, options.label);
 
     this[I.COPIES].add(copy);
-
-    // TODO: create underlying ReadableStream and assign to copy[I.STREAM]
-    // copy[I.STREAM] = new ReadableStream({
-    //   pull: async (controller) => { ... },
-    //   cancel: () => { copy.unregister(); },
-    // });
 
     return copy;
   }
