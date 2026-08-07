@@ -1,6 +1,6 @@
 import { IDistributor as ID } from '../Symbol.mjs';
 
-import { IForkedReadableStream as I } from './Symbol.mjs';
+import { I } from './Symbol.mjs';
 
 export default class ForkedReadableStream extends ReadableStream {
   [I.LABEL];

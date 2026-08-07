@@ -8,7 +8,7 @@ const I_CONSUMED = Symbol('.#consumed');
 const I_CANCELLED = Symbol('.#cancelled');
 const I_DONE = Symbol('.#done');
 
-export const IForkedReadableStream = deepFreeze({
+export const I = deepFreeze({
   LABEL: I_LABEL,
   DISTRIBUTOR: I_DISTRIBUTOR,
   CONTROLLER: I_CONTROLLER,
