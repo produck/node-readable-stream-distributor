@@ -3,7 +3,21 @@ import * as os from 'node:os';
 import { I, $I } from './Symbol.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 
-export default class ReadableStreamDistributor {
+export default class ReadableStreamDistributor extends EventTarget {
+  [I.READER] = null;
+  [I.BUFFER] = [];
+  [I.BUFFER_SIZE] = 0;
+  [$I.COPIES] = new Set();
+  [I.FILE_HANDLE] = null;
+  [I.TMPFILE_PATH] = null;
+  [I.COMMITTED_CHUNKS] = 0;
+  [I.IN_FILE_PHASE] = false;
+  [I.DESTROYED] = false;
+  [I.PULLING] = null;
+  [I.SOURCE_DONE] = false;
+  [I.SOURCE_ERROR] = null;
+  [I.TOTAL_CHUNKS] = 0;
+
   static highWaterMark() {
     return os.freemem();
   }
@@ -14,25 +28,14 @@ export default class ReadableStreamDistributor {
 
   /** @param {ReadableStream} source — must be unlocked */
   constructor(source) {
+    super();
+
     if (source.locked) {
       throw new Error('Source stream must not be locked');
     }
 
     this[I.CONSTRUCTOR] = new.target;
     this[I.SOURCE] = source;
-    this[I.READER] = null;
-    this[I.BUFFER] = [];
-    this[I.BUFFER_SIZE] = 0;
-    this[$I.COPIES] = new Set();
-    this[I.FILE_HANDLE] = null;
-    this[I.TMPFILE_PATH] = null;
-    this[I.COMMITTED_CHUNKS] = 0;
-    this[I.IN_FILE_PHASE] = false;
-    this[I.DESTROYED] = false;
-    this[I.PULLING] = null;
-    this[I.SOURCE_DONE] = false;
-    this[I.SOURCE_ERROR] = null;
-    this[I.TOTAL_CHUNKS] = 0;
   }
 
   get highWaterMark() {
@@ -59,12 +62,16 @@ export default class ReadableStreamDistributor {
     const copy = new ForkedReadableStream.Final(this, options.label);
 
     this[$I.COPIES].add(copy);
+    this.dispatchEvent(new Event('fork'));
 
     return copy;
   }
 
   destroy() {
-    // TODO: implement
+    this[I.DESTROYED] = true;
+    this.dispatchEvent(new Event('destroy'));
+
+    // TODO: stop pulling, error copies after drain, release source reader
     throw new Error('Not implemented');
   }
 }
