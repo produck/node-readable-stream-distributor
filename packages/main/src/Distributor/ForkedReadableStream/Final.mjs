@@ -1,4 +1,4 @@
-import { IDistributor as ID } from '../Symbol.mjs';
+import * as DistributorSymbol from '../Symbol.mjs';
 
 import { I } from './Symbol.mjs';
 
@@ -29,7 +29,7 @@ export default class ForkedReadableStream extends ReadableStream {
         }
 
         this[I.CANCELLED] = true;
-        this[I.DISTRIBUTOR][ID.COPIES].delete(this);
+        this[I.DISTRIBUTOR][DistributorSymbol.$I.COPIES].delete(this);
 
         // TODO: if all copies gone → cancel source reader
       },

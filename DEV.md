@@ -14,10 +14,18 @@
 
 - `I` / `S` — Instance / Static scope.
 - `#` / `$` / `_` — private / protected / abstract (Symbol description prefix).
+- `$I` (`.$*`) — instance-protected: accessible within the design family
+  (e.g. `Distributor.$I.COPIES` is used by both `Abstract.mjs` and
+  `ForkedReadableStream`).
 - Public members use plain string keys, never Symbols.
+- Symbol module exports at most 6 keys: `I`, `$I`, `_I`, `S`, `$S`, `_S`.
+  The module path serves as the namespace.
 - Currently used in this project:
-  - `_IReader.READ` (`._read()`) — ChunkReader abstract instance method.
-  - `IDistributor.*` (`.#*`) — Distributor instance-private state.
+  - `_I.READ` (`._read()`) — ChunkReader abstract instance method
+    (in `Distributor/Symbol.mjs`, to be moved).
+  - `I.*` (`.#*`) — Distributor instance-private state.
+  - `$I.COPIES` (`.$copies`) — Distributor instance-protected, shared with
+    ForkedReadableStream.
 
 ### Static + instance delegation: highWaterMark / tmpdir
 

@@ -1,6 +1,6 @@
 import * as os from 'node:os';
 
-import { IDistributor as I } from './Symbol.mjs';
+import { I, $I } from './Symbol.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 
 export default class ReadableStreamDistributor {
@@ -23,7 +23,7 @@ export default class ReadableStreamDistributor {
     this[I.READER] = null;
     this[I.BUFFER] = [];
     this[I.BUFFER_SIZE] = 0;
-    this[I.COPIES] = new Set();
+    this[$I.COPIES] = new Set();
     this[I.FILE_HANDLE] = null;
     this[I.TMPFILE_PATH] = null;
     this[I.COMMITTED_CHUNKS] = 0;
@@ -58,7 +58,7 @@ export default class ReadableStreamDistributor {
 
     const copy = new ForkedReadableStream.Final(this, options.label);
 
-    this[I.COPIES].add(copy);
+    this[$I.COPIES].add(copy);
 
     return copy;
   }
