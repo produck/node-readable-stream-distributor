@@ -1,9 +1,12 @@
 import * as os from 'node:os';
 
-import { I, $I } from './Symbol.mjs';
+import Abstract, { Member as M } from '@produck/es-abstract';
+
+import { I, $I, _S } from './Symbol.mjs';
+import { NonNegativeInteger, AbsolutePath } from './Parser.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 
-export default class ReadableStreamDistributor extends EventTarget {
+class ReadableStreamDistributor extends EventTarget {
   [I.READER] = null;
   [I.BUFFER] = [];
   [I.BUFFER_SIZE] = 0;
@@ -18,12 +21,20 @@ export default class ReadableStreamDistributor extends EventTarget {
   [I.SOURCE_ERROR] = null;
   [I.TOTAL_CHUNKS] = 0;
 
-  static highWaterMark() {
+  static [_S.HIGH_WATER_MARK]() {
     return os.freemem();
   }
 
-  static tmpdir() {
+  static [_S.TMPDIR]() {
     return process.env.TMPDIR || os.tmpdir();
+  }
+
+  static highWaterMark() {
+    return this[_S.HIGH_WATER_MARK]();
+  }
+
+  static tmpdir() {
+    return this[_S.TMPDIR]();
   }
 
   /** @param {ReadableStream} source — must be unlocked */
@@ -75,3 +86,11 @@ export default class ReadableStreamDistributor extends EventTarget {
     throw new Error('Not implemented');
   }
 }
+
+export default Abstract(
+  ReadableStreamDistributor,
+  Abstract.Static({
+    [_S.TMPDIR]: M.Method().returns(AbsolutePath),
+    [_S.HIGH_WATER_MARK]: M.Method().returns(NonNegativeInteger),
+  }),
+);

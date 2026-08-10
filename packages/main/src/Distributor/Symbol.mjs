@@ -43,3 +43,11 @@ export const I = deepFreeze({
 export const $I = deepFreeze({
   COPIES: $I_COPIES,
 });
+
+const S_TMPDIR = Symbol('._S.tmpdir()');
+const S_HIGH_WATER_MARK = Symbol('._S.highWaterMark()');
+
+export const _S = deepFreeze({
+  TMPDIR: S_TMPDIR,
+  HIGH_WATER_MARK: S_HIGH_WATER_MARK,
+});

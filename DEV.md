@@ -51,3 +51,43 @@
   shape deferred for now.
 - `Symbol.mjs` uses capital `S`, consistent with kitty and other produck
   projects.
+
+## 2026-08-10
+
+### ReadableStreamDistributor becomes a WHATWG EventTarget
+
+- `ReadableStreamDistributor extends EventTarget` — observable lifecycle via
+  standard `addEventListener` / `dispatchEvent`.
+- `fork` and `destroy` events dispatched on state change. Future events:
+  `drain` (copies to zero), `overflow` (memory→disk), `error`.
+- Keeps the package WHATWG-oriented (no Node EventEmitter dependency);
+  Node users bridge via `stream.toWeb()` if needed.
+- Symbol-keyed members make the `extends` chain collision-safe.
+
+### highWaterMark / tmpdir become static abstract members
+
+- Declared via `Abstract.Static({ [_S.TMPDIR]: M.Method(), ... })` (note:
+  static abstract members require `Abstract.Static({...})`, not `Abstract({...})`).
+- Base class provides **default implementations** on the `_S` members
+  (`os.freemem()`, `process.env.TMPDIR || os.tmpdir()`) — downstream
+  subclasses may override `[_S.HIGH_WATER_MARK]()` / `[_S.TMPDIR]()` or
+  inherit the defaults.
+- `ReadableStreamDistributor` cannot be constructed directly; it is an
+  abstract constructor.
+- Two-layer delegation:
+  - Public static `static highWaterMark()` / `static tmpdir()` — ergonomic
+    string-keyed API, delegate to the abstract `_S` members via `this`.
+  - Instance getters `get highWaterMark()` / `get tmpdir()` — delegate to
+    the public static via `new.target` (`this[I.CONSTRUCTOR].highWaterMark()`).
+- `Parser.mjs` (sibling of `Abstract.mjs`) defines the `returns` parsers:
+  - `NonNegativeInteger` — `highWaterMark` must return `>= 0` integer (bytes).
+  - `AbsolutePath` — `tmpdir` must return an absolute path (POSIX `/` or
+    Windows drive/UNC).
+- `.returns(...)` validates the base default implementations and documents
+  the contract, but **cannot trap subclass overrides** — `extends` is not
+  interceptable by the abstract constructor proxy, so a subclass's own
+  static overrides bypass runtime validation.
+- For full enforcement of subclass overrides, downstream wraps the subclass
+  with `SubConstructorProxy(Sub)` from `@produck/es-abstract`. This is a
+  documented convention (option A): produck users know the tool, and bad
+  return values surface in their unit tests during development.
