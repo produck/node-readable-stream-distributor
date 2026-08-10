@@ -29,11 +29,11 @@ class ReadableStreamDistributor extends EventTarget {
     return process.env.TMPDIR || os.tmpdir();
   }
 
-  static highWaterMark() {
+  static get highWaterMark() {
     return this[_S.HIGH_WATER_MARK]();
   }
 
-  static tmpdir() {
+  static get tmpdir() {
     return this[_S.TMPDIR]();
   }
 
@@ -50,11 +50,11 @@ class ReadableStreamDistributor extends EventTarget {
   }
 
   get highWaterMark() {
-    return this[I.CONSTRUCTOR].highWaterMark();
+    return this[I.CONSTRUCTOR].highWaterMark;
   }
 
   get tmpdir() {
-    return this[I.CONSTRUCTOR].tmpdir();
+    return this[I.CONSTRUCTOR].tmpdir;
   }
 
   fork(options) {

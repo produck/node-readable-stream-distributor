@@ -75,14 +75,16 @@
 - `ReadableStreamDistributor` cannot be constructed directly; it is an
   abstract constructor.
 - Two-layer delegation:
-  - Public static `static highWaterMark()` / `static tmpdir()` — ergonomic
-    string-keyed API, delegate to the abstract `_S` members via `this`.
-  - Instance getters `get highWaterMark()` / `get tmpdir()` — delegate to
-    the public static via `new.target` (`this[I.CONSTRUCTOR].highWaterMark()`).
+  - Public static `static get highWaterMark` / `static get tmpdir` — ergonomic
+    string-keyed getters (no-arg accessors), delegate to the abstract `_S`
+    members via `this`.
+  - Instance getters `get highWaterMark` / `get tmpdir` — delegate to
+    the public static getters via `new.target`
+    (`this[I.CONSTRUCTOR].highWaterMark`).
 - `Parser.mjs` (sibling of `Abstract.mjs`) defines the `returns` parsers:
   - `NonNegativeInteger` — `highWaterMark` must return `>= 0` integer (bytes).
-  - `AbsolutePath` — `tmpdir` must return an absolute path (POSIX `/` or
-    Windows drive/UNC).
+  - `AbsolutePath` — `tmpdir` must return an absolute path, implemented via
+    Node `path.isAbsolute()` (package is Node-only for now; no browser plan).
 - `.returns(...)` validates the base default implementations and documents
   the contract, but **cannot trap subclass overrides** — `extends` is not
   interceptable by the abstract constructor proxy, so a subclass's own

@@ -1,3 +1,5 @@
+import * as path from 'node:path';
+
 import { ThrowTypeError } from '@produck/type-error';
 
 export function NonNegativeInteger(value) {
@@ -9,14 +11,7 @@ export function NonNegativeInteger(value) {
 }
 
 export function AbsolutePath(value) {
-  if (typeof value !== 'string' || value.length === 0) {
-    ThrowTypeError('member', 'an absolute path string');
-  }
-
-  const isPosix = value.startsWith('/');
-  const isWindows = /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
-
-  if (!isPosix && !isWindows) {
+  if (typeof value !== 'string' || !path.isAbsolute(value)) {
     ThrowTypeError('member', 'an absolute path string');
   }
 
