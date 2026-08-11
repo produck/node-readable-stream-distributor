@@ -7,7 +7,6 @@ export default class ForkedReadableStream extends ReadableStream {
   [I.DISTRIBUTOR];
   [I.CONTROLLER];
   [I.CHUNK_READER] = null;
-  [I.CONSUMED] = 0;
   [I.CANCELLED] = false;
   [I.DONE] = false;
 
@@ -47,5 +46,9 @@ export default class ForkedReadableStream extends ReadableStream {
   /** @param {import('../../chunk-reader.mjs').default} reader */
   [$I.SET_CHUNK_READER](reader) {
     this[I.CHUNK_READER] = reader;
+  }
+
+  [$I.GET_CHUNK_READER]() {
+    return this[I.CHUNK_READER];
   }
 }

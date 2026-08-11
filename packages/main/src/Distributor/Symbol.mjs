@@ -1,11 +1,5 @@
 import { deepFreeze } from '@produck/deep-freeze-enumerable';
 
-const _I_READ = Symbol('._read()');
-
-export const _I = deepFreeze({
-  READ: _I_READ,
-});
-
 const I_CONSTRUCTOR = Symbol('.#constructor');
 const I_SOURCE = Symbol('.#source');
 const I_SOURCE_READER = Symbol('.#sourceReader');
