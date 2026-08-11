@@ -8,7 +8,7 @@ export const _I = deepFreeze({
 
 const I_CONSTRUCTOR = Symbol('.#constructor');
 const I_SOURCE = Symbol('.#source');
-const I_READER = Symbol('.#reader');
+const I_SOURCE_READER = Symbol('.#sourceReader');
 const I_BUFFER = Symbol('.#buffer');
 const I_BUFFER_SIZE = Symbol('.#bufferSize');
 const I_FILE_HANDLE = Symbol('.#fileHandle');
@@ -26,7 +26,7 @@ const $I_COPIES = Symbol('.$copies');
 export const I = deepFreeze({
   CONSTRUCTOR: I_CONSTRUCTOR,
   SOURCE: I_SOURCE,
-  READER: I_READER,
+  SOURCE_READER: I_SOURCE_READER,
   BUFFER: I_BUFFER,
   BUFFER_SIZE: I_BUFFER_SIZE,
   FILE_HANDLE: I_FILE_HANDLE,

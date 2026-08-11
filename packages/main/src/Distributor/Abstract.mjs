@@ -7,7 +7,7 @@ import { NonNegativeInteger, AbsolutePath } from './Parser.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 
 class ReadableStreamDistributor extends EventTarget {
-  [I.READER] = null;
+  [I.SOURCE_READER] = null;
   [I.BUFFER] = [];
   [I.BUFFER_SIZE] = 0;
   [$I.COPIES] = new Set();

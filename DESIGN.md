@@ -156,8 +156,12 @@ title Chunk 文件格式
 
 ## Chunk 读取器
 
-每个拷贝持有独立的 `ChunkReader`。策略切换时替换读取器，
-提前 skip 到位。
+**术语**：`ChunkReader` —— 一片一片读取 chunk 的概念装置。每个拷贝
+持有独立的 `ChunkReader`，策略切换时替换读取器，提前 skip 到位。
+
+与 `source reader`（从源流拉取的 reader）区分：`ChunkReader` 是拷贝
+侧的读取装置，`source reader` 是分发器侧的拉取装置，二者职责不同，
+代码与文档中不共用 `READER` 一词。
 
 ### 接口
 

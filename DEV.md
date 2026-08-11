@@ -93,3 +93,30 @@
   with `SubConstructorProxy(Sub)` from `@produck/es-abstract`. This is a
   documented convention (option A): produck users know the tool, and bad
   return values surface in their unit tests during development.
+
+## 2026-08-11
+
+### Reader terminology disambiguation
+
+- `READER` was overloaded across two concepts; split into canonical terms
+  (also recorded in DESIGN.md "Chunk 读取器"):
+  - `ChunkReader` — the piece-by-piece chunk-reading device owned by each
+    copy (`ForkedReadableStream.I.CHUNK_READER`, `$I.SET_CHUNK_READER`).
+  - `source reader` — the distributor-side pull device
+    (`Distributor.I.SOURCE_READER`).
+- `ForkedReadableStream.$I.SET_CHUNK_READER` is the protected swap contract:
+  the Distributor asks a copy to swap its chunk reader on memory→file phase
+  transition. No validation (trusted caller); reader swap is transparent to
+  the copy because both `BufferReader`/`FileReader` implement the same
+  `read()` interface.
+
+### `start` callback cannot access `this`
+
+- In `ForkedReadableStream extends ReadableStream`, the `start` callback
+  runs **synchronously inside `super()`**, so `this` is in the temporal dead
+  zone. It must capture the controller via a local variable (`_controller`)
+  bridged to `this[I.CONTROLLER]` after `super()` returns.
+- `pull` / `cancel` are called asynchronously (after construction), so they
+  may use `this` directly.
+- Earlier assumption that `void this` inside `start` was runtime-safe was
+  wrong: lint only checks statically, not TDZ execution.
