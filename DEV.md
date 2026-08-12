@@ -101,14 +101,17 @@
 - `READER` was overloaded across two concepts; split into canonical terms
   (also recorded in DESIGN.md "Chunk 读取器"):
   - `ChunkReader` — the piece-by-piece chunk-reading device owned by each
-    copy (`ForkedReadableStream.I.CHUNK_READER`, `$I.SET_CHUNK_READER`).
+    copy (`ForkedReadableStream.I.CHUNK_READER`, `$I.CHUNK_READER`).
   - `source reader` — the distributor-side pull device
     (`Distributor.I.SOURCE_READER`).
-- `ForkedReadableStream.$I.SET_CHUNK_READER` is the protected swap contract:
-  the Distributor asks a copy to swap its chunk reader on memory→file phase
-  transition. No validation (trusted caller); reader swap is transparent to
-  the copy because both `BufferReader`/`FileReader` implement the same
-  `read()` interface.
+- `ForkedReadableStream.$I.CHUNK_READER` is a **protected** get/set accessor
+  for the copy's chunk reader. It is a symbol (`$I`) because downstream
+  consumers receive the `ForkedReadableStream` instance directly from
+  `fork()`, so a public accessor would expose the internal reader and let
+  consumers interfere with the stream's own pulls. The Distributor swaps
+  readers via `copy[$I.CHUNK_READER] = newReader`. No validation (trusted
+  caller); reader swap is transparent to the copy because both
+  `BufferReader`/`FileReader` implement the same `read()` interface.
 
 ### `start` callback cannot access `this`
 

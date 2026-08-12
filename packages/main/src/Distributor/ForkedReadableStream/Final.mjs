@@ -10,10 +10,6 @@ export default class ForkedReadableStream extends ReadableStream {
   [I.CANCELLED] = false;
   [I.DONE] = false;
 
-  /**
-   * @param {import('../Abstract.mjs').default} distributor
-   * @param {string} label
-   */
   constructor(distributor, label) {
     let _controller;
 
@@ -43,12 +39,11 @@ export default class ForkedReadableStream extends ReadableStream {
     this[I.CONTROLLER] = _controller;
   }
 
-  /** @param {import('../../chunk-reader.mjs').default} reader */
-  [$I.SET_CHUNK_READER](reader) {
-    this[I.CHUNK_READER] = reader;
+  get [$I.CHUNK_READER]() {
+    return this[I.CHUNK_READER];
   }
 
-  [$I.GET_CHUNK_READER]() {
-    return this[I.CHUNK_READER];
+  set [$I.CHUNK_READER](reader) {
+    this[I.CHUNK_READER] = reader;
   }
 }

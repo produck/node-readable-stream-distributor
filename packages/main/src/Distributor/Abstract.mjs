@@ -37,7 +37,6 @@ class ReadableStreamDistributor extends EventTarget {
     return this[_S.TMPDIR]();
   }
 
-  /** @param {ReadableStream} source — must be unlocked */
   constructor(source) {
     super();
 
