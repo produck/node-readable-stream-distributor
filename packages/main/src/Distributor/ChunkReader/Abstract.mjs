@@ -4,6 +4,21 @@ import { I, _I } from './Symbol.mjs';
 
 class ChunkReader {
   [I.CONSUMED] = 0;
+  [I.CLOSED] = false;
+
+  [_I.CLOSE]() {
+    // Default no-op: readers without resources (e.g. BufferChunkReader)
+    // inherit this.
+  }
+
+  async close() {
+    if (this[I.CLOSED]) {
+      return;
+    }
+
+    this[I.CLOSED] = true;
+    await this[_I.CLOSE]();
+  }
 
   async read() {
     const { value, done } = await this[_I.READ]();
@@ -34,5 +49,6 @@ export default Abstract(
   ChunkReader,
   Abstract({
     [_I.READ]: M.Method(),
+    [_I.CLOSE]: M.Method(),
   }),
 );

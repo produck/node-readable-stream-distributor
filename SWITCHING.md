@@ -54,6 +54,39 @@
   对协调无感。
 - 跨模块共享状态访问一律走明确的契约接口，不得越权直接写。
 
+## 已收敛设计：`init` Promise 屏障
+
+切换竞态的核心解法已收敛为 **`init` Promise 屏障**，依托"read 恒为
+Promise"这一事实：
+
+### 同 tick 换读器
+
+换读器全程**同步**，同一 tick 内一次完成，杜绝"读半截 buffer"窗口：
+
+```text
+同 tick（同步）：
+  读各拷贝 consumedChunks → 构造 FileChunkReader(init, skipN, committed)
+    → 换入 $I.CHUNK_READER（全部拷贝）
+之后（异步）：
+  init 链：open → flush → skip 到位 → 就绪
+  read()：总是 await init → 再读文件
+```
+
+- `FileChunkReader` 构造时保存 `init`（创建 FileHandler + flush 的
+  Promise）；所有 `read()` 都从 `init` then/await 出来。
+- skip 到位在 `init` 过程中完成（按旧 ChunkReader 进度定位）。
+- 切换期间到达的 pull 自然 `await init` 挂着——Promise 就是调度队列，
+  无需显式暂停/排队机制，`ForkedReadableStream.pull` 零切换感知。
+
+### 两个注意细节
+
+- **进度初始化**：skip 是定位不是新消费。`FileChunkReader` 就绪时须把
+  基类 `I.CONSUMED` 初始化为 `skipN`（而非靠 `read()` 累计），否则进度
+  记错，后续再切换会出错。需基类提供"设置初始进度"途径。
+- **文件句柄生命周期**：所有拷贝共享同一 `init`（同一 fileHandle）。
+  `close()` 归最后一个离开的拷贝（done/cancel/destroy 皆算），
+  归属要在协议里定清，避免提前关闭或泄漏。
+
 ## 背景与目标
 
 `Buffer[]` 累计超过 `highWaterMark` 时，分发器从内存阶段切换到
@@ -79,26 +112,32 @@
 
 ### 2. 竞态清单
 
-- [ ] flush 进行中，拷贝 pull 从 BufferReader 读 → 半截数据
+- [x] ~~flush 进行中，拷贝 pull 从 BufferReader 读 → 半截数据~~
+      已解：同 tick 换读器后无拷贝再碰 buffer。
 - [ ] switching 期间新 `fork()` 的拷贝 → 拿到的 reader 指向何物？
 - [ ] 切换途中某拷贝 `cancel` / `destroy` → 未完成的 reader 怎么办？
-- [ ] 慢拷贝落后：skip 位置 = 该拷贝 `consumedChunks`，如何保证
-      切换瞬间读到的是已 flush 的边界？
+- [x] ~~慢拷贝落后：skip 位置 = 该拷贝 `consumedChunks`，如何保证
+      切换瞬间读到的是已 flush 的边界？~~
+      已解：skip 到位在 init 过程中，`read()` await init 后才读文件。
 - [ ] flush 期间 source 有新数据到达 → 先入 buffer 还是直接入文件？
 
 ### 3. 协调原语
 
 - pull 如何在 switching 期间排队 / 等待？
+  已解方向：无需显式排队，pull 的 `read()` 天然 `await init`。
 - 读器替换的"原子性"边界：对拷贝流而言，`$I.CHUNK_READER` 一次
   替换是否足够？是否需要"先暂停、再换、再放行"？
+  已解方向：同 tick 换读器即原子，无需三拍。
 - 背压与切换的交互：切换本身是背压点，还是与既有背压点（flush
   未完成暂停 source.read）合并？
 
 ### 4. FileChunkReader 接口
 
-- 构造参数：`(fileHandle, skipChunks, committedChunks)`？
+- 构造参数：`(initPromise, skipChunks, committedChunks)`？
+  （`init` 为 open + flush 的 Promise，非裸 fileHandle）
 - `_I.READ` 如何按 position 游标前进？
-- 与 flush 的读写顺序保证（先写后读？）
+- `I.CONSUMED` 初始化为 `skipChunks`（skip 是定位非新消费）
+- 文件句柄关闭归属：最后一个拷贝离开时 close
 
 ### 5. 错误路径
 
