@@ -15,8 +15,6 @@ const I_SOURCE_DONE = Symbol('.#sourceDone');
 const I_SOURCE_ERROR = Symbol('.#sourceError');
 const I_TOTAL_CHUNKS = Symbol('.#totalChunks');
 
-const $I_COPIES = Symbol('.$copies');
-
 export const I = deepFreeze({
   CONSTRUCTOR: I_CONSTRUCTOR,
   SOURCE: I_SOURCE,
@@ -33,6 +31,8 @@ export const I = deepFreeze({
   SOURCE_ERROR: I_SOURCE_ERROR,
   TOTAL_CHUNKS: I_TOTAL_CHUNKS,
 });
+
+const $I_COPIES = Symbol('.$copies');
 
 export const $I = deepFreeze({
   COPIES: $I_COPIES,

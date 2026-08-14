@@ -123,3 +123,31 @@
   may use `this` directly.
 - Earlier assumption that `void this` inside `start` was runtime-safe was
   wrong: lint only checks statically, not TDZ execution.
+
+## 2026-08-13
+
+### ChunkReader lifecycle: close() + initialize()
+
+- `ChunkReader` gains a public `close()` (idempotent, base-guarded via
+  `I.CLOSED`), delegating teardown to abstract `_I.CLOSE` (base default
+  no-op for resource-free readers like BufferChunkReader).
+- Initialization uses the abstract layer as the readiness barrier:
+  - `_I.INITIALIZE` — abstract member, returns `PromiseLike<undefined>` or
+    `undefined` (sync init, no barrier). Side effects only.
+  - `I.INITIALIZED` — private member holding the barrier promise (or
+    undefined); `read()`/`close()` unconditionally `await` it.
+  - `$I.START_INITIALIZE` — protected trigger, guarded to run once
+    (`I.INITIALIZATION_STARTED`). Calls `_I.INITIALIZE` and stores the
+    result.
+- **Subclass self-init** (decided): the subclass defines `_I.INITIALIZE` and
+  calls `$I.START_INITIALIZE` once at the end of its own constructor (after
+  stashing params). Not auto-run in the base constructor because subclass
+  fields are unavailable during `super()`.
+- Rationale / justification:
+  - The abstract barrier makes "read waits for readiness" an un-forgettable
+    invariant (vs. per-implementation awaiting inside `_I.READ`).
+  - The `$I.START_INITIALIZE` autonomy (subclass decides WHEN init starts
+    and what to do AFTER init) is forward-looking: the future storage
+    degradation strategy (BROWSER.md) needs backends with differing init
+    timing and post-init work (Node temp files vs IndexedDB/OPFS vs pure
+    memory). This hook is that abstraction's first landing point.
