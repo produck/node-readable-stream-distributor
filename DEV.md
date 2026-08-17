@@ -151,3 +151,19 @@
     degradation strategy (BROWSER.md) needs backends with differing init
     timing and post-init work (Node temp files vs IndexedDB/OPFS vs pure
     memory). This hook is that abstraction's first landing point.
+
+## 2026-08-16
+
+### START_INITIALIZE control moves to the Distributor (reversed)
+
+- Reversed the "subclass self-init" decision. The Distributor now calls
+  `$I.START_INITIALIZE`, not the subclass.
+- Reason: subclass self-init let the downstream implementation do extra work
+  AFTER triggering init, which created state uncertainty. The clean contract
+  is: the subclass constructor only arranges context (stashes params) and
+  defines `_I.INITIALIZE`; the Distributor starts the initialization at a
+  fixed, controlled point (same tick as construction).
+- The mechanism is unchanged (`$I.START_INITIALIZE` + once-guard + same-tick
+  TODO); only the caller changes.
+- New contract for subclasses: constructor = context arrangement only. No
+  init trigger, no post-init work.

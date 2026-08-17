@@ -87,6 +87,24 @@ Promise"这一事实：
   `close()` 归最后一个离开的拷贝（done/cancel/destroy 皆算），
   归属要在协议里定清，避免提前关闭或泄漏。
 
+## 分发器与 ChunkReader 构造协议（已明确）
+
+- **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 **UUID**
+  作为唯一标识（构造时生成）。供存储工件唯一命名（如临时文件
+  `tmp-<id>-...`）。
+- **构造上下文 = `{ id, progress, bufferList }`**：分发器创建 ChunkReader
+  时只提供这三项：
+  - `id` — 分发器 UUID（源流身份）
+  - `progress` — 该拷贝的 `consumedChunks`（skip 位置）
+  - `bufferList` — 共享内存缓冲（BufferChunkReader 直接读它）
+  - reader 其余要素由子类自己实现；分发器不提供存储实现细节
+    （临时目录、文件句柄、路径）。
+- **TemporaryFileChunkReader**（未来）：临时文件目录通过**配置方法 +
+  默认实现**提供，属子类职责，非分发器维护。
+- **动态替换回退 reader 类**：分发器提供"设置回退 ChunkReader 类"的
+  方法，可动态替换存储降级阶段使用的 reader 子类（"回退策略读取器
+  机制"，呼应 BROWSER.md 存储降级策略抽象）。
+
 ## 背景与目标
 
 `Buffer[]` 累计超过 `highWaterMark` 时，分发器从内存阶段切换到
@@ -133,10 +151,11 @@ Promise"这一事实：
 
 ### 4. FileChunkReader 接口
 
-- 构造参数：`(initPromise, skipChunks, committedChunks)`？
-  （`init` 为 open + flush 的 Promise，非裸 fileHandle）
+- 构造：分发器传 `{ id, progress, bufferList }` 上下文；文件句柄等
+  存储要素由子类自建（TemporaryFileChunkReader 的临时目录走配置 +
+  默认实现）。
 - `_I.READ` 如何按 position 游标前进？
-- `I.CONSUMED` 初始化为 `skipChunks`（skip 是定位非新消费）
+- `I.CONSUMED` 初始化为 skip 位置（skip 是定位非新消费）
 - 文件句柄关闭归属：最后一个拷贝离开时 close
 
 ### 5. 错误路径

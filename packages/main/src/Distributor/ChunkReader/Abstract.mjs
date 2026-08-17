@@ -8,9 +8,10 @@ class ChunkReader {
   [I.INITIALIZATION_STARTED] = false;
   [I.INITIALIZED];
 
-  // The subclass calls START_INITIALIZE once at the end of its own
-  // constructor (after stashing params); it is not auto-run here so the
-  // subclass controls the exact timing.
+  // The Distributor calls START_INITIALIZE once, right after constructing
+  // the reader (same tick). The subclass constructor only arranges context
+  // (stashes params) and defines _I.INITIALIZE; it never triggers init, so
+  // there is no post-init work that could create state uncertainty.
   [$I.START_INITIALIZE]() {
     // TODO: START_INITIALIZE MUST be called within the same tick as the
     // constructor. The abstract layer should guard this (e.g. a microtask
