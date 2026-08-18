@@ -2,11 +2,19 @@ import Abstract, { Member as M } from '@produck/es-abstract';
 
 import { I, $I, _I } from './Symbol.mjs';
 
-class ChunkReader {
+class AbstractChunkReader {
   [I.CONSUMED] = 0;
   [I.CLOSED] = false;
   [I.INITIALIZATION_STARTED] = false;
   [I.INITIALIZED];
+
+  // The Distributor passes `{ id, progress, bufferList }`; these shared
+  // context members are created here and subclasses use them directly.
+  constructor({ id, progress = 0, bufferList }) {
+    this[$I.ID] = id;
+    this[$I.PROGRESS] = progress;
+    this[$I.BUFFER_LIST] = bufferList;
+  }
 
   // The Distributor calls START_INITIALIZE once, right after constructing
   // the reader (same tick). The subclass constructor only arranges context
@@ -71,7 +79,7 @@ class ChunkReader {
 }
 
 export default Abstract(
-  ChunkReader,
+  AbstractChunkReader,
   Abstract({
     [_I.READ]: M.Method(),
     [_I.CLOSE]: M.Method(),

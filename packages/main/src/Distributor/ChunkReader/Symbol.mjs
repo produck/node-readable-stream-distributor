@@ -12,9 +12,15 @@ export const I = deepFreeze({
   INITIALIZED: I_INITIALIZED,
 });
 
+const $I_ID = Symbol('.$I.id');
+const $I_PROGRESS = Symbol('.$I.progress');
+const $I_BUFFER_LIST = Symbol('.$I.bufferList');
 const $I_START_INITIALIZE = Symbol('.$I.startInitialize()');
 
 export const $I = deepFreeze({
+  ID: $I_ID,
+  PROGRESS: $I_PROGRESS,
+  BUFFER_LIST: $I_BUFFER_LIST,
   START_INITIALIZE: $I_START_INITIALIZE,
 });
 
