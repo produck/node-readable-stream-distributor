@@ -16,7 +16,7 @@ export const I = deepFreeze({
   DONE: I_DONE,
 });
 
-const $I_CHUNK_READER = Symbol('.$I.chunkReader');
+const $I_CHUNK_READER = Symbol('.$chunkReader');
 
 export const $I = deepFreeze({
   CHUNK_READER: $I_CHUNK_READER,
