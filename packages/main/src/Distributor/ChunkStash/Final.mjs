@@ -1,6 +1,6 @@
 import { I, $I } from './Symbol.mjs';
 
-export class ChunkBulk {
+export default class ChunkStash {
   [I.CHUNKS] = [];
   [I.BYTE_LENGTH] = 0;
 

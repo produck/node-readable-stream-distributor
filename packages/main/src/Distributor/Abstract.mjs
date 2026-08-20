@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import { I, $I, _S } from './Symbol.mjs';
-import { NonNegativeInteger, AbsolutePath } from './Parser.mjs';
+import { NonNegativeInteger } from './Parser.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 
 class ReadableStreamDistributor extends EventTarget {
@@ -11,8 +11,6 @@ class ReadableStreamDistributor extends EventTarget {
   [I.BUFFER] = [];
   [I.BUFFER_SIZE] = 0;
   [$I.COPIES] = new Set();
-  [I.FILE_HANDLE] = null;
-  [I.TMPFILE_PATH] = null;
   [I.COMMITTED_CHUNKS] = 0;
   [I.IN_FILE_PHASE] = false;
   [I.DESTROYED] = false;
@@ -25,16 +23,8 @@ class ReadableStreamDistributor extends EventTarget {
     return os.freemem();
   }
 
-  static [_S.TMPDIR]() {
-    return process.env.TMPDIR || os.tmpdir();
-  }
-
   static get highWaterMark() {
     return this[_S.HIGH_WATER_MARK]();
-  }
-
-  static get tmpdir() {
-    return this[_S.TMPDIR]();
   }
 
   constructor(source) {
@@ -50,10 +40,6 @@ class ReadableStreamDistributor extends EventTarget {
 
   get highWaterMark() {
     return this[I.CONSTRUCTOR].highWaterMark;
-  }
-
-  get tmpdir() {
-    return this[I.CONSTRUCTOR].tmpdir;
   }
 
   fork(options) {
@@ -89,7 +75,6 @@ class ReadableStreamDistributor extends EventTarget {
 export default Abstract(
   ReadableStreamDistributor,
   Abstract.Static({
-    [_S.TMPDIR]: M.Method().returns(AbsolutePath),
     [_S.HIGH_WATER_MARK]: M.Method().returns(NonNegativeInteger),
   }),
 );

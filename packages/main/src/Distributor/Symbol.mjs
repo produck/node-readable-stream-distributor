@@ -5,8 +5,6 @@ const I_SOURCE = Symbol('.#source');
 const I_SOURCE_READER = Symbol('.#sourceReader');
 const I_BUFFER = Symbol('.#buffer');
 const I_BUFFER_SIZE = Symbol('.#bufferSize');
-const I_FILE_HANDLE = Symbol('.#fileHandle');
-const I_TMPFILE_PATH = Symbol('.#tmpfilePath');
 const I_COMMITTED_CHUNKS = Symbol('.#committedChunks');
 const I_IN_FILE_PHASE = Symbol('.#inFilePhase');
 const I_DESTROYED = Symbol('.#destroyed');
@@ -21,8 +19,6 @@ export const I = deepFreeze({
   SOURCE_READER: I_SOURCE_READER,
   BUFFER: I_BUFFER,
   BUFFER_SIZE: I_BUFFER_SIZE,
-  FILE_HANDLE: I_FILE_HANDLE,
-  TMPFILE_PATH: I_TMPFILE_PATH,
   COMMITTED_CHUNKS: I_COMMITTED_CHUNKS,
   IN_FILE_PHASE: I_IN_FILE_PHASE,
   DESTROYED: I_DESTROYED,
@@ -38,10 +34,8 @@ export const $I = deepFreeze({
   COPIES: $I_COPIES,
 });
 
-const S_TMPDIR = Symbol('._tmpdir()');
 const S_HIGH_WATER_MARK = Symbol('._highWaterMark()');
 
 export const _S = deepFreeze({
-  TMPDIR: S_TMPDIR,
   HIGH_WATER_MARK: S_HIGH_WATER_MARK,
 });
