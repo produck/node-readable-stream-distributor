@@ -10,10 +10,10 @@ export class BufferChunkReader extends AbstractChunkReader {
   async [_I.READ]() {
     const index = this[$I.PROGRESS] + this[I.CONSUMED];
 
-    if (index >= this[$I.BUFFER_LIST].length) {
+    if (index >= this[$I.CHUNK_STASH].length) {
       return { done: true };
     }
 
-    return { value: this[$I.BUFFER_LIST][index], done: false };
+    return { value: this[$I.CHUNK_STASH].get(index), done: false };
   }
 }

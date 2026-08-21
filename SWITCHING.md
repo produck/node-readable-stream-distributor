@@ -92,15 +92,24 @@ Promise"这一事实：
 - **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 **UUID**
   作为唯一标识（构造时生成）。供存储工件唯一命名（如临时文件
   `tmp-<id>-...`）。
-- **构造上下文 = `{ id, progress, bufferList }`**：分发器创建 ChunkReader
+- **构造上下文 = `{ id, progress, chunkStash }`**：分发器创建 ChunkReader
   时只提供这三项：
   - `id` — 分发器 UUID（源流身份）
   - `progress` — 该拷贝的 `consumedChunks`（skip 位置）
-  - `bufferList` — 共享内存缓冲（BufferChunkReader 直接读它）
+  - `chunkStash` — 共享的 `ChunkStash`（内存阶段缓冲）。`BufferChunkReader`
+    直接读它；回退读取器在切换时对它执行 `drop()`
   - reader 其余要素由子类自己实现；分发器不提供存储实现细节
     （临时目录、文件句柄、路径）。
+- **`AbstractFallbackChunkReader` 抽象中间层**：回退读取器家族的统一
+  基类。进入回退策略后，无论具体回退存储是什么，切换都要执行同一套
+  公共动作——打开/填充回退存储，然后对共享 `ChunkStash` 执行一次
+  `drop()`（内存阶段到此为止）。该层以模板方式强制这一公共动作，
+  具体存储读写由子类实现 `_I.OPEN`（打开存储）并继承 `_I.READ` /
+  `_I.CLOSE`（读回/清理）。
 - **TemporaryFileChunkReader**（未来）：临时文件目录通过**配置方法 +
-  默认实现**提供，属子类职责，非分发器维护。
+  默认实现**提供，属子类职责，非分发器维护。它是
+  `AbstractFallbackChunkReader` 的 Node 文件系统实现；浏览器分支
+  （IndexedDB / OPFS）同挂其下。
 - **动态替换回退 reader 类**：分发器提供"设置回退 ChunkReader 类"的
   方法，可动态替换存储降级阶段使用的 reader 子类（"回退策略读取器
   机制"，呼应 BROWSER.md 存储降级策略抽象）。
@@ -151,9 +160,10 @@ Promise"这一事实：
 
 ### 4. FileChunkReader 接口
 
-- 构造：分发器传 `{ id, progress, bufferList }` 上下文；文件句柄等
+- 构造：分发器传 `{ id, progress, chunkStash }` 上下文；文件句柄等
   存储要素由子类自建（TemporaryFileChunkReader 的临时目录走配置 +
-  默认实现）。
+  默认实现）。回退读取器继承 `AbstractFallbackChunkReader`，实现
+  `_I.OPEN` / `_I.READ` / `_I.CLOSE`。
 - `_I.READ` 如何按 position 游标前进？
 - `I.CONSUMED` 初始化为 skip 位置（skip 是定位非新消费）
 - 文件句柄关闭归属：最后一个拷贝离开时 close

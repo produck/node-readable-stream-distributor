@@ -8,12 +8,14 @@ class AbstractChunkReader {
   [I.INITIALIZATION_STARTED] = false;
   [I.INITIALIZED];
 
-  // The Distributor passes `{ id, progress, bufferList }`; these shared
+  // The Distributor passes `{ id, progress, chunkStash }`; these shared
   // context members are created here and subclasses use them directly.
-  constructor({ id, progress = 0, bufferList }) {
+  // The shared ChunkStash is the memory-phase buffer: BufferChunkReader
+  // reads it directly, fallback readers drop it when switching.
+  constructor({ id, progress = 0, chunkStash }) {
     this[$I.ID] = id;
     this[$I.PROGRESS] = progress;
-    this[$I.BUFFER_LIST] = bufferList;
+    this[$I.CHUNK_STASH] = chunkStash;
   }
 
   // The Distributor calls START_INITIALIZE once, right after constructing

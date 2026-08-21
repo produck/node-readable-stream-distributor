@@ -19,6 +19,14 @@ degradation): `node:fs`, `node:os`, `node:path`, `node:crypto`.
 The Distributor must NOT embody filesystem concepts (e.g. `tmpdir`). The disk
 spillover is one implementation of a **storage degradation strategy layer**.
 
+The `ChunkReader` hierarchy already reflects this split:
+
+- `BufferChunkReader` reads the shared `ChunkStash` directly (memory path).
+- `AbstractFallbackChunkReader` is the degradation branch: the common switch
+  routine (open the fallback store, then `ChunkStash.drop()`) is enforced as
+  a template, and concrete storages hang beneath it via `_I.OPEN` plus the
+  inherited `_I.READ` / `_I.CLOSE`.
+
 The current shape already fits: `highWaterMark` + `tmpdir` are the two knobs
 downstream implements via the `_S` abstract members. A future refactor would:
 

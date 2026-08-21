@@ -167,3 +167,19 @@
   TODO); only the caller changes.
 - New contract for subclasses: constructor = context arrangement only. No
   init trigger, no post-init work.
+
+## 2026-08-20
+
+### ChunkReader 分叉：AbstractFallbackChunkReader 抽象中间层
+
+- `BufferChunkReader` 直接消费共享 `ChunkStash`（内存路径，按 index 读，
+  `done` 由 `stash.length` 决定）。
+- 新增 `AbstractFallbackChunkReader`（`ChunkReader/Fallback.mjs`）：回退
+  读取器家族的抽象中间层。`_I.INITIALIZE` 模板强制切换公共动作——打开/
+  填充回退存储（子类 `_I.OPEN`）→ 对共享 `ChunkStash` 执行一次 `drop()`。
+  具体存储读写由子类实现 `_I.OPEN` + 继承的 `_I.READ` / `_I.CLOSE`。
+- 构造上下文 `bufferList` 更名 `chunkStash`（语义即共享 `ChunkStash`），
+  `Symbol.mjs` 的 `$I.BUFFER_LIST` 改为 `$I.CHUNK_STASH`，新增 `_I.OPEN`。
+- `TemporaryFileChunkReader`（未来）将作为 `AbstractFallbackChunkReader`
+  的 Node 文件系统实现；浏览器分支（IndexedDB / OPFS）同挂其下——呼应
+  BROWSER.md 的存储降级策略抽象。

@@ -111,12 +111,14 @@ graph TD
 
 ### 模块
 
-| 模块                        | 职责                                                               |
-| --------------------------- | ------------------------------------------------------------------ |
-| `ReadableStreamDistributor` | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现 |
-| `BufferReader`              | 内存阶段——从 `Buffer[]` 按 index 读取                              |
-| `FileReader`                | 文件阶段——从 chunk 文件按游标读取                                  |
-| chunk 文件格式              | `[4B len][chunk data]...` 自描述序列                               |
+| 模块                          | 职责                                                               |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现 |
+| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，`drop()` 一次性清空并密封            |
+| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                 |
+| `AbstractFallbackChunkReader` | 回退读取器抽象中间层——强制切换公共动作（含 `drop()`），不绑定存储  |
+| `TemporaryFileChunkReader`    | （未来）文件阶段——回退抽象层的 Node 文件系统实现                   |
+| chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                               |
 
 ## 缓存文件格式
 
@@ -171,6 +173,30 @@ interface ChunkReader {
 }
 ```
 
+### 分叉架构
+
+`ChunkReader` 家族在消费 `ChunkStash` 的方式上分叉：
+
+```mermaid
+graph BT
+    BufferChunkReader["BufferChunkReader<br/>直接读共享 ChunkStash"]
+    AbstractFallbackChunkReader["AbstractFallbackChunkReader<br/>回退切换公共动作"]
+    TemporaryFileChunkReader["TemporaryFileChunkReader<br/>文件回退实现（未来）"]
+    AbstractChunkReader["AbstractChunkReader<br/>生命周期/进度/初始化屏障"]
+    BufferChunkReader --> AbstractChunkReader
+    AbstractFallbackChunkReader --> AbstractChunkReader
+    TemporaryFileChunkReader --> AbstractFallbackChunkReader
+```
+
+- `BufferChunkReader` 直接消费共享 `ChunkStash`（按 index 读，`done`
+  由 `stash.length` 决定），是内存路径分支。
+- `AbstractFallbackChunkReader` 是回退读取器家族的抽象中间层：无论
+  具体回退存储是什么，切换都执行同一套公共动作——打开/填充回退存储
+  → `stash.drop()`，由该层模板强制；具体存储读写（`_I.OPEN`、继承的
+  `_I.READ` / `_I.CLOSE`）由子类实现。
+- `TemporaryFileChunkReader` 是 `AbstractFallbackChunkReader` 的 Node
+  文件系统实现；浏览器分支（IndexedDB / OPFS）同挂其下。
+
 ### 切换流程
 
 ```mermaid
@@ -190,8 +216,8 @@ sequenceDiagram
 
     BUF-->>BUF: 累计超过阈值
     DIST->>FILE: 将 Buffer[] 内容写入<br/>[4B len][chunk 1]..[chunk 10]
-    DIST->>A: 替换读取器: BufferReader → FileReader<br/>已消费 10 个 → 不从文件回放
-    DIST->>B: 替换读取器: BufferReader → FileReader<br/>只消费 2 个 → skip 前 2 个 chunk → 从 chunk 3 开始 enqueue
+    DIST->>A: 替换读取器: BufferChunkReader → TemporaryFileChunkReader<br/>已消费 10 个 → 不从文件回放
+    DIST->>B: 替换读取器: BufferChunkReader → TemporaryFileChunkReader<br/>只消费 2 个 → skip 前 2 个 chunk → 从 chunk 3 开始 enqueue
     DIST->>BUF: 清空
 
     SRC->>DIST: read() chunk 11..
@@ -267,8 +293,8 @@ sequenceDiagram
 拷贝的 `pull()` 触发 `source.read()`，拿到 chunk 后广播给所有
 活跃拷贝（各自 `enqueue`）。
 
-慢拷贝不阻塞快拷贝——落后时走 FileReader 从磁盘回放即可，不参与
-source 推进节奏。source 的速率由整体消费节奏决定，不由分发器
+慢拷贝不阻塞快拷贝——落后时走 TemporaryFileChunkReader 从磁盘回放即
+可，不参与 source 推进节奏。source 的速率由整体消费节奏决定，不由分发器
 预设。
 
 背压点只有一个：`Buffer[]` 已满且上一次磁盘 flush 尚未完成时，

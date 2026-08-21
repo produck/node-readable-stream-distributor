@@ -14,22 +14,24 @@ export const I = deepFreeze({
 
 const $I_ID = Symbol('.$id');
 const $I_PROGRESS = Symbol('.$progress');
-const $I_BUFFER_LIST = Symbol('.$bufferList');
+const $I_CHUNK_STASH = Symbol('.$chunkStash');
 const $I_START_INITIALIZE = Symbol('.$startInitialize()');
 
 export const $I = deepFreeze({
   ID: $I_ID,
   PROGRESS: $I_PROGRESS,
-  BUFFER_LIST: $I_BUFFER_LIST,
+  CHUNK_STASH: $I_CHUNK_STASH,
   START_INITIALIZE: $I_START_INITIALIZE,
 });
 
 const _I_READ = Symbol('._read()');
 const _I_CLOSE = Symbol('._close()');
 const _I_INITIALIZE = Symbol('._initialize()');
+const _I_OPEN = Symbol('._open()');
 
 export const _I = deepFreeze({
   READ: _I_READ,
   CLOSE: _I_CLOSE,
   INITIALIZE: _I_INITIALIZE,
+  OPEN: _I_OPEN,
 });
