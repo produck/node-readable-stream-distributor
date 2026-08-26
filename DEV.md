@@ -183,3 +183,42 @@
 - `TemporaryFileChunkReader`（未来）将作为 `AbstractFallbackChunkReader`
   的 Node 文件系统实现；浏览器分支（IndexedDB / OPFS）同挂其下——呼应
   BROWSER.md 的存储降级策略抽象。
+
+## 2026-08-26
+
+### Fallback 静态转存设计（`AbstractFallbackChunkReader`）
+
+- 转存职责在静态侧：抽象静态 `_S.DUMP(chunkStash)`（返回 PromiseOr，
+  会被转为 Promise），公开静态 `dump(chunkStash)` 调用它，Promisify 并
+  做抽象层异常处理修饰，把生成的 Promise 记录到静态 WeakMap
+  `S.DUMPING`（`ChunkStash` ↔ 转存 Promise）。
+- 实例级 `getChunkStashDumping()` 从 `S.DUMPING` 查询；实例构造经
+  受保护 `$I.CHUNK_STASH` 持有共享 stash（维持受保护、不新增符号），
+  所有初始化过程 `await dumping`——**仅阻塞、不提供产物**。
+- 转存产物经回退策略自备的 WeakMap 传递；`id`/文件名等是回退策略
+  内部细节（移除分发器 `id`）。
+- 移除 `_I.OPEN`（文件类领域术语；抽象初始化已含 open 概念）。
+
+### 目录安排约定
+
+- 内部类在对应的目录向下扩展；子类平行于其抽象类建立目录进行实现
+  （抽象类 `Abstract.mjs` 在家族目录根部，每个子类各建平行子目录，
+  内部按 `Final.mjs` + `index.mjs` + `Symbol.mjs` 组织）。
+
+### 目录安排约定（取舍：维持统一规则）
+
+- 曾考虑"按需建目录"的判别规则（仅被扩展/有专属符号/独立导出的类
+  建目录，叶子类平级），但特例过多难以遵守，放弃。
+- 维持"一目录一类"的统一规则，接受少量目录浪费：一致性换来机械可
+  执行（无需判断，任何类都进目录），避免规则漂移。
+- 该模式本质类似 C# partial class 的设计目标——一个复杂类是内部
+  相关资源的混合体——但更灵活：无需语言标记，目录即文件系统层的
+  资源聚合（`Final.mjs`/`Abstract.mjs` + `Symbol.mjs` + `index.mjs` +
+  子类目录），打开目录即见类的全部。
+- `Final` 与 `Abstract` 存在性互斥：一个目录内主类文件只有一个
+  （具体 → `Final.mjs`，抽象 → `Abstract.mjs`）。
+- "结构碎"的收益：每文件职责单一（类本体/符号/导出分离），目录路径
+  即命名空间，跨模块符号冲突被物理隔离（呼应 Symbol 模块 ≤6 键约束）。
+- 目录根部可并存共享模块与类聚合（如 `Distributor/` 根部 `Parser.mjs`
+  - `Symbol.mjs` + `index.mjs`，同时 `ChunkStash/`、`ForkedReadableStream/`
+    各聚合类资源）。

@@ -111,14 +111,45 @@ graph TD
 
 ### 模块
 
-| 模块                          | 职责                                                               |
-| ----------------------------- | ------------------------------------------------------------------ |
-| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现 |
-| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，`drop()` 一次性清空并密封            |
-| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                 |
-| `AbstractFallbackChunkReader` | 回退读取器抽象中间层——强制切换公共动作（含 `drop()`），不绑定存储  |
-| `TemporaryFileChunkReader`    | （未来）文件阶段——回退抽象层的 Node 文件系统实现                   |
-| chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                               |
+| 模块                          | 职责                                                                  |
+| ----------------------------- | --------------------------------------------------------------------- |
+| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现    |
+| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，`drop()` 一次性清空并密封               |
+| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                    |
+| `AbstractFallbackChunkReader` | 回退读取器抽象中间层——静态转存（`_S.DUMP` + `S.DUMPING`），不绑定存储 |
+| `TemporaryFileChunkReader`    | （未来）文件阶段——回退抽象层的 Node 文件系统实现                      |
+| chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                                  |
+
+### 目录安排约定
+
+- **内部类在对应的目录向下扩展**：一个家族模块（如 `ChunkReader`）的
+  内部实现按类各自建立子目录，向下嵌套扩展。
+- **子类平行于其抽象类建立目录**：抽象类文件 `Abstract.mjs` 放在
+  家族目录根部；每个子类各建一个平行子目录（目录名对应类名），内部
+  按模块模式组织（`Final.mjs` + `index.mjs` + `Symbol.mjs`）。
+- 若子目录内仍有更深层的类，继续向下扩展（子目录内部再建平行
+  子目录）。
+
+示例（`ChunkReader` 家族）：
+
+```text
+ChunkReader/
+  Abstract.mjs      # AbstractChunkReader（抽象基类）
+  index.mjs
+  Symbol.mjs
+  Buffer/           # BufferChunkReader（平行子目录）
+    Final.mjs
+    index.mjs
+    Symbol.mjs
+  Fallback/         # AbstractFallbackChunkReader（平行子目录）
+    Abstract.mjs    # 抽象中间层
+    index.mjs
+    Symbol.mjs
+    TemporaryFile/  # 向下扩展：TemporaryFileChunkReader（未来）
+      Final.mjs
+      index.mjs
+      Symbol.mjs
+```
 
 ## 缓存文件格式
 
@@ -190,10 +221,19 @@ graph BT
 
 - `BufferChunkReader` 直接消费共享 `ChunkStash`（按 index 读，`done`
   由 `stash.length` 决定），是内存路径分支。
-- `AbstractFallbackChunkReader` 是回退读取器家族的抽象中间层：无论
-  具体回退存储是什么，切换都执行同一套公共动作——打开/填充回退存储
-  → `stash.drop()`，由该层模板强制；具体存储读写（`_I.OPEN`、继承的
-  `_I.READ` / `_I.CLOSE`）由子类实现。
+- `AbstractFallbackChunkReader` 是回退读取器家族的抽象中间层。转存
+  职责在**静态侧**：
+  - `_S.DUMP(chunkStash)` — 抽象静态，返回 PromiseOr（会被转为
+    Promise），转存 ChunkStash 到回退存储并执行 `stash.drop()`。
+  - `dump(chunkStash)` — 公开静态，调用 `_S.DUMP`，Promisify 并做
+    抽象层异常处理修饰，将生成的 Promise 记录到 `S.DUMPING`（静态
+    WeakMap：`ChunkStash` ↔ 转存 Promise）。
+  - `getChunkStashDumping()` — 实例级成员，从 `S.DUMPING` 查询本实例
+    `ChunkStash` 的转存 Promise；初始化过程 `await` 它（仅阻塞，
+    不提供产物）。
+  - 转存产物经回退策略自备的 WeakMap 传递；`id` / 文件名等是回退
+    策略内部细节，非分发器职责。
+  - **不设 `_I.OPEN`**：抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
 - `TemporaryFileChunkReader` 是 `AbstractFallbackChunkReader` 的 Node
   文件系统实现；浏览器分支（IndexedDB / OPFS）同挂其下。
 

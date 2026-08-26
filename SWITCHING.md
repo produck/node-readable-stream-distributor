@@ -89,23 +89,52 @@ Promise"这一事实：
 
 ## 分发器与 ChunkReader 构造协议（已明确）
 
-- **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 **UUID**
-  作为唯一标识（构造时生成）。供存储工件唯一命名（如临时文件
-  `tmp-<id>-...`）。
-- **构造上下文 = `{ id, progress, chunkStash }`**：分发器创建 ChunkReader
-  时只提供这三项：
-  - `id` — 分发器 UUID（源流身份）
-  - `progress` — 该拷贝的 `consumedChunks`（skip 位置）
-  - `chunkStash` — 共享的 `ChunkStash`（内存阶段缓冲）。`BufferChunkReader`
-    直接读它；回退读取器在切换时对它执行 `drop()`
-  - reader 其余要素由子类自己实现；分发器不提供存储实现细节
-    （临时目录、文件句柄、路径）。
+> 2026-08-26 设计讨论修订：移除分发器 `id`；转存职责移到
+> `AbstractFallbackChunkReader` 静态侧（`_S.DUMP` + `dump()`）；
+> 不设 `_I.OPEN`。下文标注"已认可"的为定稿方向，其余待定。
+
+- ~~**分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 UUID
+  作为唯一标识（构造时生成），供存储工件唯一命名。~~
+  **已移除**（已认可，2026-08-26）：分发器不承担标识职能。ChunkStash
+  作为数据制品层承担数据职责；若某个回退方案需要字符串 `id`，那是
+  该回退方案（下游）的责任，`DUMP` 逻辑自理。
+- **构造上下文**：分发器创建 ChunkReader 时提供共享 `chunkStash` 与
+  `progress`（该拷贝 `consumedChunks`，skip 位置）。`BufferChunkReader`
+  直接读 `chunkStash`；回退读取器切换时由静态转存执行 `drop()`。
+  reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
+  目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属回退
+  策略内部细节。
 - **`AbstractFallbackChunkReader` 抽象中间层**：回退读取器家族的统一
-  基类。进入回退策略后，无论具体回退存储是什么，切换都要执行同一套
-  公共动作——打开/填充回退存储，然后对共享 `ChunkStash` 执行一次
-  `drop()`（内存阶段到此为止）。该层以模板方式强制这一公共动作，
-  具体存储读写由子类实现 `_I.OPEN`（打开存储）并继承 `_I.READ` /
-  `_I.CLOSE`（读回/清理）。
+  基类。转存职责在**静态侧**：
+  - 抽象静态成员 `_S.DUMP`（已认可）：**靠参数拿到 `chunkStash`**，
+    负责转存 ChunkStash 数据到回退存储并执行 `stash.drop()`。返回
+    **PromiseOr**（已认可）。
+  - 配套公开静态成员 `dump()`（已认可命名）：调用 `_S.DUMP`，把
+    返回值 **Promisify** 并做**抽象层异常处理修饰**，将生成的
+    Promise 记录到 `S.DUMPING`（WeakMap）上（已认可）。
+  - 静态成员 `S.DUMPING`（已认可）：Fallback 抽象层自持的 WeakMap，
+    管理 `_S.DUMP` 返回的东西（`ChunkStash` ↔ 转存 Promise）。
+  - 实例级查询成员 `getChunkStashDumping()`（已认可）：实例读取器
+    从 `S.DUMPING` 查询其 `ChunkStash` 对应的转存 Promise。
+  - 【待定：实例如何访问静态 `S.DUMPING`（如 `this.constructor`）；
+    异常处理修饰的具体形式（错误包装/类型）】
+  - **Fallback 自定义资源可自备 WeakMap**（已认可）：转存后副作用
+    （产物）经回退策略自备的 WeakMap 机制传递给实例读取器。例如
+    文件回退在 `DUMP` 时自行生成 uuid 或文件名；`id` / 文件名等是
+    回退策略自己的内部细节，非分发器职责。
+  - 实例级回退读取器构造时经受保护 `$I.CHUNK_STASH` 持有共享
+    `chunkStash`（已认可：维持受保护、不新增符号，构造阶段与
+    `AbstractChunkReader` 协议对齐），**所有初始化过程都 await
+    dumping**（已认可）。
+  - **`await dumping` 只提供阻塞，不提供产物**（已认可）：它是转存
+    完成的屏障。时序为分发器先执行静态 `dump()`，再并发 `new`
+    实例，再并发开始初始化；初始化中的 `await this.getChunkStashDumping()`
+    自然等待转存完成；若转存已完成则直接通过。产物传递走回退策略
+    自备的 WeakMap，与 dumping 屏障解耦。
+  - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类 Fallback 的领域
+    术语，抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
+  - 【待定：`_S.DUMP` 返回的 Promise resolve 值（转存产物）的结构；
+    实例侧 `_I.INITIALIZE` / `_I.READ` 具体签名】
 - **TemporaryFileChunkReader**（未来）：临时文件目录通过**配置方法 +
   默认实现**提供，属子类职责，非分发器维护。它是
   `AbstractFallbackChunkReader` 的 Node 文件系统实现；浏览器分支

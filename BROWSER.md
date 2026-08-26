@@ -22,10 +22,13 @@ spillover is one implementation of a **storage degradation strategy layer**.
 The `ChunkReader` hierarchy already reflects this split:
 
 - `BufferChunkReader` reads the shared `ChunkStash` directly (memory path).
-- `AbstractFallbackChunkReader` is the degradation branch: the common switch
-  routine (open the fallback store, then `ChunkStash.drop()`) is enforced as
-  a template, and concrete storages hang beneath it via `_I.OPEN` plus the
-  inherited `_I.READ` / `_I.CLOSE`.
+- `AbstractFallbackChunkReader` is the degradation branch. Dumping lives on
+  the static side: `_S.DUMP(chunkStash)` (returns PromiseOr, normalized to
+  a Promise) transfers the stash and drops it; `dump()` records the dumping
+  Promise in the static `S.DUMPING` WeakMap, and instance readers
+  `await getChunkStashDumping()` during init. Concrete storages hang
+  beneath it via the inherited `_I.READ` / `_I.CLOSE` plus their own
+  WeakMap for dump side-effects.
 
 The current shape already fits: `highWaterMark` + `tmpdir` are the two knobs
 downstream implements via the `_S` abstract members. A future refactor would:
