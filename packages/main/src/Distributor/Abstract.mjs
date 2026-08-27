@@ -55,7 +55,7 @@ class ReadableStreamDistributor extends EventTarget {
       throw new Error('Distributor has been destroyed');
     }
 
-    const copy = new ForkedReadableStream.Final(this, options.label);
+    const copy = new ForkedReadableStream.Concrete(this, options.label);
 
     this[$I.COPIES].add(copy);
     this.dispatchEvent(new Event('fork'));

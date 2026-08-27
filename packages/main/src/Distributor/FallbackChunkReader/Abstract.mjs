@@ -1,7 +1,7 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
 
-import AbstractChunkReader from './Abstract.mjs';
-import { $I, _I } from './Symbol.mjs';
+import AbstractChunkReader from '../ChunkReader/Abstract.mjs';
+import { $I, _I } from '../ChunkReader/Symbol.mjs';
 
 // Fallback readers (e.g. file-backed) stop consuming the shared ChunkStash.
 // Whatever the concrete fallback storage is, switching always performs the

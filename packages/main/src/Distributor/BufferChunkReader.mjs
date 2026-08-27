@@ -1,5 +1,5 @@
-import AbstractChunkReader from './Abstract.mjs';
-import { I, $I, _I } from './Symbol.mjs';
+import AbstractChunkReader from './ChunkReader/Abstract.mjs';
+import { I, $I, _I } from './ChunkReader/Symbol.mjs';
 
 export class BufferChunkReader extends AbstractChunkReader {
   [_I.INITIALIZE]() {

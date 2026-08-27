@@ -122,33 +122,38 @@ graph TD
 
 ### 目录安排约定
 
-- **内部类在对应的目录向下扩展**：一个家族模块（如 `ChunkReader`）的
-  内部实现按类各自建立子目录，向下嵌套扩展。
-- **子类平行于其抽象类建立目录**：抽象类文件 `Abstract.mjs` 放在
-  家族目录根部；每个子类各建一个平行子目录（目录名对应类名），内部
-  按模块模式组织（`Final.mjs` + `index.mjs` + `Symbol.mjs`）。
-- 若子目录内仍有更深层的类，继续向下扩展（子目录内部再建平行
-  子目录）。
+- **内部类在对应的目录向下扩展**：非继承关系的内部实现类，在所属
+  模块目录下各自建目录（向下嵌套扩展）。如 `ChunkStash/`、
+  `ForkedReadableStream/` 在 `Distributor/` 下。
+- **子类平行于其抽象类的类目录建立目录**：抽象类占据一个"类目录"
+  （如 `ChunkReader/` = `AbstractChunkReader`）；继承它的子类，其目录
+  与抽象类的类目录**平行**——同一父目录下的兄弟层级，而非在其内部
+  向下扩展。子类目录内部按模块模式组织（`Abstract.mjs` / `Concrete.mjs`
+  - `index.mjs` + `Symbol.mjs`）。
+- **唯一特例：极端简化单文件**。无子类、无专属符号、无需独立导出
+  入口的实现，可用单文件模式不建目录，平铺在与抽象类类目录平行的
+  位置，文件名即类名。当前仅 `BufferChunkReader` 采用
+  （`Distributor/BufferChunkReader.mjs`）。
 
-示例（`ChunkReader` 家族）：
+示例：
 
 ```text
-ChunkReader/
-  Abstract.mjs      # AbstractChunkReader（抽象基类）
-  index.mjs
-  Symbol.mjs
-  Buffer/           # BufferChunkReader（平行子目录）
-    Final.mjs
+Distributor/
+  BufferChunkReader.mjs # AbstractChunkReader 子类（单文件特例）
+  ChunkReader/          # AbstractChunkReader（抽象类类目录）
+    Abstract.mjs
     index.mjs
     Symbol.mjs
-  Fallback/         # AbstractFallbackChunkReader（平行子目录）
-    Abstract.mjs    # 抽象中间层
+  FallbackChunkReader/  # AbstractFallbackChunkReader（子类，与 ChunkReader/ 平行）
+    Abstract.mjs        # 抽象中间层
     index.mjs
     Symbol.mjs
-    TemporaryFile/  # 向下扩展：TemporaryFileChunkReader（未来）
-      Final.mjs
-      index.mjs
-      Symbol.mjs
+  TemporaryFile/        # （未来）TemporaryFileChunkReader（子类，与 FallbackChunkReader/ 平行）
+    Concrete.mjs
+    index.mjs
+    Symbol.mjs
+  ChunkStash/           # 内部类（向下扩展）
+  ForkedReadableStream/ # 内部类（向下扩展）
 ```
 
 ## 缓存文件格式

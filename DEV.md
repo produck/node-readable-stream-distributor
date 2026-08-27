@@ -203,7 +203,7 @@
 
 - 内部类在对应的目录向下扩展；子类平行于其抽象类建立目录进行实现
   （抽象类 `Abstract.mjs` 在家族目录根部，每个子类各建平行子目录，
-  内部按 `Final.mjs` + `index.mjs` + `Symbol.mjs` 组织）。
+  内部按 `Concrete.mjs` + `index.mjs` + `Symbol.mjs` 组织）。
 
 ### 目录安排约定（取舍：维持统一规则）
 
@@ -213,12 +213,47 @@
   执行（无需判断，任何类都进目录），避免规则漂移。
 - 该模式本质类似 C# partial class 的设计目标——一个复杂类是内部
   相关资源的混合体——但更灵活：无需语言标记，目录即文件系统层的
-  资源聚合（`Final.mjs`/`Abstract.mjs` + `Symbol.mjs` + `index.mjs` +
+  资源聚合（`Concrete.mjs`/`Abstract.mjs` + `Symbol.mjs` + `index.mjs` +
   子类目录），打开目录即见类的全部。
-- `Final` 与 `Abstract` 存在性互斥：一个目录内主类文件只有一个
-  （具体 → `Final.mjs`，抽象 → `Abstract.mjs`）。
+- `Concrete` 与 `Abstract` 存在性互斥：一个目录内主类文件只有一个
+  （具体 → `Concrete.mjs`，抽象 → `Abstract.mjs`）。
 - "结构碎"的收益：每文件职责单一（类本体/符号/导出分离），目录路径
   即命名空间，跨模块符号冲突被物理隔离（呼应 Symbol 模块 ≤6 键约束）。
 - 目录根部可并存共享模块与类聚合（如 `Distributor/` 根部 `Parser.mjs`
   - `Symbol.mjs` + `index.mjs`，同时 `ChunkStash/`、`ForkedReadableStream/`
     各聚合类资源）。
+
+## 2026-08-27
+
+### BufferChunkReader 单文件特例（迁移）
+
+- 迁移 `BufferChunkReader` 从 `ChunkReader/Buffer.mjs` 到
+  `Distributor/BufferChunkReader.mjs`（单文件，文件名即类名）。
+- 引入目录约定的**唯一特例**：极端简化（无子类、无专属符号、无需
+  独立导出入口）时可用单文件模式，不展开目录。
+- `ChunkReader/index.mjs` 不再导出 `BufferChunkReader`；改由
+  `Distributor/index.mjs` 导出。
+
+### Fallback 展开目录（迁移）
+
+- 迁移 `AbstractFallbackChunkReader` 从 `ChunkReader/Fallback.mjs` 到
+  `ChunkReader/Fallback/Abstract.mjs`，展开为独立目录。
+- `ChunkReader/Fallback/` 目录：`Abstract.mjs`（抽象中间层）+
+  `index.mjs`（`export { default as Abstract }`）。Fallback 专属符号
+  （如未来 `S.DUMPING` / `_S.DUMP`）实现时再建 `Fallback/Symbol.mjs`。
+- `ChunkReader/index.mjs` 经 `export { Abstract as AbstractFallbackChunkReader }`
+  转发（`Fallback/index.mjs` 导出的是 named `Abstract`，非 default）。
+
+### Fallback 位置修正（平行于抽象类类目录）
+
+- 昨天落笔的目录约定对"平行"理解有偏差：误把子类目录画在抽象类
+  家族目录内部（向下扩展）。
+- 正确规则：**子类**是继承关系，其目录**平行于抽象类的类目录**（同一
+  父目录下的兄弟层级），而非在抽象类目录内向下扩展；**向下扩展仅适用
+  于非继承关系的内部类**。
+- `AbstractFallbackChunkReader` 正确位置为 `Distributor/FallbackChunkReader/`
+  （目录名对应类名：类名去 `Abstract` 前缀；与 `ChunkReader/` =
+  `AbstractChunkReader` 的类目录平行），改由 `Distributor/index.mjs`
+  导出；`ChunkReader/index.mjs` 不再导出它。
+- `BufferChunkReader` 位于 `Distributor/BufferChunkReader.mjs` 即此规则
+  的旁证（子类平行于抽象类类目录）。
