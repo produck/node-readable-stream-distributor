@@ -20,6 +20,9 @@
 - Public members use plain string keys, never Symbols.
 - Symbol module exports at most 6 keys: `I`, `$I`, `_I`, `S`, `$S`, `_S`.
   The module path serves as the namespace.
+- **对外导出限制**：`index.mjs` 只导出受保护/抽象空间
+  （`$I`/`$S`/`_I`/`_S`），**严格不导出私有空间 `I`/`S`**（仅模块
+  内部使用）。
 - Currently used in this project:
   - `_I.READ` (`._read()`) — ChunkReader abstract instance method
     (in `Distributor/Symbol.mjs`, to be moved).
@@ -257,3 +260,31 @@
   导出；`ChunkReader/index.mjs` 不再导出它。
 - `BufferChunkReader` 位于 `Distributor/BufferChunkReader.mjs` 即此规则
   的旁证（子类平行于抽象类类目录）。
+
+## 2026-08-28
+
+### FallbackChunkReader 自有 Symbol 与 dump 机制落地
+
+- 补建 `FallbackChunkReader/Symbol.mjs`（此前迁移时漏建，违反"一目录
+  一类：Abstract/Concrete + index + Symbol"约定）。
+- Fallback 家族自有符号：`S.DUMPING`（静态 WeakMap 键）、`_S.DUMP`
+  （抽象静态转存）。同时修复残留的裸 `_I.OPEN` 引用（未 import 的
+  bug）——`_I.OPEN` 不再使用（设计已移除）。
+- `AbstractFallbackChunkReader` 落地已认可设计：
+  - `static [S.DUMPING] = new WeakMap()`：stash ↔ dumping Promise 注册表。
+  - `static dump(chunkStash)`：调用 `_S.DUMP`，经
+    `Promise.resolve().then(...)` Promisify（同步异常转 rejected），
+    记录到 `S.DUMPING`。
+  - 实例 `getChunkStashDumping()`：经 `this.constructor[S.DUMPING]`
+    查询本实例 stash 的转存 Promise。
+  - `_I.INITIALIZE` 返回 `this.getChunkStashDumping()`（await 屏障，
+    仅阻塞、不产产物）。
+- **私有符号空间不对外导出**：`index.mjs` 只导出受保护/抽象空间
+  （`$I`/`$S`/`_I`/`_S`），严格不导出 `I`/`S`。据此移除
+  `ChunkStash/index.mjs` 的 `I` 导出与 `FallbackChunkReader/index.mjs`
+  的 `S` 导出（`S.DUMPING` 仅模块内部使用）。
+- **实例访问自身静态成员不用 `this.constructor`**（不安全），采用
+  `I.CONSTRUCTOR` 符号 + 构造时 `new.target` 捕获（与
+  `Distributor/Abstract.mjs` 一致）。`FallbackChunkReader` 新增
+  `I.CONSTRUCTOR`，`getChunkStashDumping()` 经
+  `this[I.CONSTRUCTOR][S.DUMPING]` 访问静态 WeakMap。
