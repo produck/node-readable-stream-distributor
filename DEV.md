@@ -274,7 +274,9 @@
   - `static [S.DUMPING] = new WeakMap()`：stash ↔ dumping Promise 注册表。
   - `static dump(chunkStash)`：调用 `_S.DUMP`，经
     `Promise.resolve().then(...)` Promisify（同步异常转 rejected），
-    记录到 `S.DUMPING`。
+    记录到 `S.DUMPING`；失败经 `.catch()` 做**抽象层异常转义**——
+    包装为可辨识的 dumping 错误（`Ow.Error.Common`，原始错误作
+    `cause`）。
   - 实例 `getChunkStashDumping()`：经 `this.constructor[S.DUMPING]`
     查询本实例 stash 的转存 Promise。
   - `_I.INITIALIZE` 返回 `this.getChunkStashDumping()`（await 屏障，

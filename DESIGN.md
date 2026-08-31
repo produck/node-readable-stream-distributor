@@ -103,7 +103,7 @@ graph TD
     COPY_B --> CONSUMER_B["消费者 B"]
     COPY_N --> CONSUMER_N["消费者 N"]
 
-    BUFFER -- "满且 flush 未完成 →<br/>暂停 source.read()" --> SOURCE
+    BUFFER -- "满且 dump 未完成 →<br/>暂停 source.read()" --> SOURCE
     COPY_A -- "unregister" --> COUNTER{"活跃计数 -1"}
     COPY_B -- "unregister" --> COUNTER
     COUNTER -- "归零 → reader.cancel()" --> SOURCE
@@ -342,8 +342,8 @@ sequenceDiagram
 可，不参与 source 推进节奏。source 的速率由整体消费节奏决定，不由分发器
 预设。
 
-背压点只有一个：`Buffer[]` 已满且上一次磁盘 flush 尚未完成时，
-暂停 `source.read()`，flush 完成后恢复。即**磁盘写入带宽决定速率**。
+背压点只有一个：`Buffer[]` 已满且上一次 dump 尚未完成时，
+暂停 `source.read()`，dump 完成后恢复。即**磁盘写入带宽决定速率**。
 
 这与传统"木桶效应"（最慢消费者决定整体速率）不同——两级存储
 （内存→磁盘）切断了快慢消费者之间的耦合。快拷贝驱动 source

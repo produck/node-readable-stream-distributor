@@ -17,7 +17,7 @@
     与 FileChunkReader 的异步 I/O 对齐。
   - 正是这个统一 async 契约，让 `$I.CHUNK_READER` 切换透明——拷贝
     不关心前后是不是同一个 reader。
-- 单线程 JS 中 `await` 是天然顺序化点：`await flush → 换读器` 不可能
+- 单线程 JS 中 `await` 是天然顺序化点：`await dump → 换读器` 不可能
   穿插。可靠性来自 Promise 顺序化，而非同步 I/O。
 
 ## 单一协调者模型（已明确）
@@ -38,10 +38,10 @@
 
 ```text
 进入 switching → 暂停 source 拉取 → fs.promises.open
-  → flush Buffer[] → 算各拷贝 skip → 换读器 → 恢复拉取
+  → dump Buffer[] → 算各拷贝 skip → 换读器 → 恢复拉取
 ```
 
-切换天然并入既有背压点（flush 未完成暂停 source.read），不是新增机制。
+切换天然并入既有背压点（dump 未完成暂停 source.read），不是新增机制。
 
 ### 实现范围约束
 
@@ -68,11 +68,11 @@ Promise"这一事实：
   读各拷贝 consumedChunks → 构造 FileChunkReader(init, skipN, committed)
     → 换入 $I.CHUNK_READER（全部拷贝）
 之后（异步）：
-  init 链：open → flush → skip 到位 → 就绪
+  init 链：dump → skip 到位 → 就绪
   read()：总是 await init → 再读文件
 ```
 
-- `FileChunkReader` 构造时保存 `init`（创建 FileHandler + flush 的
+- `FileChunkReader` 构造时保存 `init`（创建 FileHandler + dump 的
   Promise）；所有 `read()` 都从 `init` then/await 出来。
 - skip 到位在 `init` 过程中完成（按旧 ChunkReader 进度定位）。
 - 切换期间到达的 pull 自然 `await init` 挂着——Promise 就是调度队列，
@@ -93,8 +93,8 @@ Promise"这一事实：
 > `AbstractFallbackChunkReader` 静态侧（`_S.DUMP` + `dump()`）；
 > 不设 `_I.OPEN`。下文标注"已认可"的为定稿方向，其余待定。
 
-- ~~**分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 UUID
-  作为唯一标识（构造时生成），供存储工件唯一命名。~~
+- **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 UUID
+  作为唯一标识（构造时生成），供存储工件唯一命名。
   **已移除**（已认可，2026-08-26）：分发器不承担标识职能。ChunkStash
   作为数据制品层承担数据职责；若某个回退方案需要字符串 `id`，那是
   该回退方案（下游）的责任，`DUMP` 逻辑自理。
@@ -152,7 +152,7 @@ Promise"这一事实：
 本协议讨论切换期间各方的协调，确保：
 
 - 切换对拷贝流透明（拷贝只感知 `read()` 的返回值）
-- 切换期间无竞态（flush 与读 buffer 互斥）
+- 切换期间无竞态（dump 与读 buffer 互斥）
 - 快慢拷贝的 skip 位置正确
 - 切换中的新 fork / cancel / destroy 行为确定
 
@@ -168,14 +168,24 @@ Promise"这一事实：
 
 ### 2. 竞态清单
 
-- [x] ~~flush 进行中，拷贝 pull 从 BufferReader 读 → 半截数据~~
+- [x] dump 进行中，拷贝 pull 从 BufferReader 读 → 半截数据
       已解：同 tick 换读器后无拷贝再碰 buffer。
+- [x] 回退读取器在 dump 完成前读取 → 读到不完整/半截数据
+      已解（框架层落定 2026-08-28）：`AbstractFallbackChunkReader`
+      的 `_I.INITIALIZE` await dumping 屏障（`S.DUMPING`），`read()` /
+      `close()` await `I.INITIALIZED`，转存完成前绝不读；所有消费者
+      共享同一 Promise 屏障，dump 失败统一转义并传播给所有（含迟到）
+      消费者。
 - [ ] switching 期间新 `fork()` 的拷贝 → 拿到的 reader 指向何物？
 - [ ] 切换途中某拷贝 `cancel` / `destroy` → 未完成的 reader 怎么办？
-- [x] ~~慢拷贝落后：skip 位置 = 该拷贝 `consumedChunks`，如何保证
-      切换瞬间读到的是已 flush 的边界？~~
+- [x] 慢拷贝落后：skip 位置 = 该拷贝 `consumedChunks`，如何保证
+      切换瞬间读到的是已 dump 的边界？
       已解：skip 到位在 init 过程中，`read()` await init 后才读文件。
-- [ ] flush 期间 source 有新数据到达 → 先入 buffer 还是直接入文件？
+- [ ] dump 期间 source 有新数据到达 → 先入 buffer 还是直接入文件？
+
+> 剩余未决项集中在**分发器侧调度**：切换触发与 `dump()` 调用时机、
+> 同 tick 原子换读器、切换中 `fork`/`cancel`/`destroy` 行为、source
+> 暂停/恢复衔接。
 
 ### 3. 协调原语
 
@@ -184,28 +194,29 @@ Promise"这一事实：
 - 读器替换的"原子性"边界：对拷贝流而言，`$I.CHUNK_READER` 一次
   替换是否足够？是否需要"先暂停、再换、再放行"？
   已解方向：同 tick 换读器即原子，无需三拍。
-- 背压与切换的交互：切换本身是背压点，还是与既有背压点（flush
+- 背压与切换的交互：切换本身是背压点，还是与既有背压点（dump
   未完成暂停 source.read）合并？
 
 ### 4. FileChunkReader 接口
 
-- 构造：分发器传 `{ id, progress, chunkStash }` 上下文；文件句柄等
-  存储要素由子类自建（TemporaryFileChunkReader 的临时目录走配置 +
-  默认实现）。回退读取器继承 `AbstractFallbackChunkReader`，实现
-  `_I.OPEN` / `_I.READ` / `_I.CLOSE`。
+- 构造：分发器传 `{ progress, chunkStash }` 上下文（`id` 已移除，
+  属回退策略内部细节）；文件句柄等存储要素由子类自建
+  （TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。回退
+  读取器继承 `AbstractFallbackChunkReader`，实现 `_S.DUMP` 及继承的
+  `_I.READ` / `_I.CLOSE`。
 - `_I.READ` 如何按 position 游标前进？
 - `I.CONSUMED` 初始化为 skip 位置（skip 是定位非新消费）
 - 文件句柄关闭归属：最后一个拷贝离开时 close
 
 ### 5. 错误路径
 
-- flush 中途失败（磁盘满、写错误）
+- dump 中途失败（磁盘满、写错误）
 - 文件打开失败
 - 切换中断后的恢复 / 降级
 
 ## 已知约束（讨论前提）
 
-- flush 使用 `fs.promises.open` + FileHandle（DESIGN.md 已假定
+- dump 使用 `fs.promises.open` + FileHandle（DESIGN.md 已假定
   `fileHandle.read/write`），异步 I/O。
 - `ForkedReadableStream.$I.CHUNK_READER` 保护存取器（get/set）是换读器
   的契约接口，切换实现将基于它。
