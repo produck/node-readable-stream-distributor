@@ -290,3 +290,15 @@
   `Distributor/Abstract.mjs` 一致）。`FallbackChunkReader` 新增
   `I.CONSTRUCTOR`，`getChunkStashDumping()` 经
   `this[I.CONSTRUCTOR][S.DUMPING]` 访问静态 WeakMap。
+
+## 2026-09-02
+
+### `_I.SEEK`：skip 与 read 解耦
+
+- 抽象 `_I.SEEK`（`._seek()`）：只移动一个位置、不读取数据，返回
+  done（是否越界）。`skip(n)` 改为逐块 `_I.SEEK` 推进 `I.CONSUMED`，
+  不再复用 `read()` 的完整公共路径（避免返回值构造、body 读取等
+  fan-in 开销）。
+- `BufferChunkReader` 实现 `_I.SEEK`（越界判断 O(1)，不读数据）；
+  文件回退 reader 的 `_I.SEEK` 只读 4B 头 + 前进游标（不读 body），
+  skip 效率优化留在具体实现（线性变长结构 + 偏移索引待定）。

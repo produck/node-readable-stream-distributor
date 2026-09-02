@@ -203,9 +203,10 @@ Promise"这一事实：
   属回退策略内部细节）；文件句柄等存储要素由子类自建
   （TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。回退
   读取器继承 `AbstractFallbackChunkReader`，实现 `_S.DUMP` 及继承的
-  `_I.READ` / `_I.CLOSE`。
-- `_I.READ` 如何按 position 游标前进？
-- `I.CONSUMED` 初始化为 skip 位置（skip 是定位非新消费）
+  `_I.READ` / `_I.SEEK` / `_I.CLOSE`。
+- `_I.READ` 按 position 游标前进（读 body）；`_I.SEEK` 只读 4B 头并
+  前进游标（不读 body），供 `skip()` 定位。
+- `I.CONSUMED` 由 `skip()` 基于 `_I.SEEK` 推进（skip 是定位非新消费）
 - 文件句柄关闭归属：最后一个拷贝离开时 close
 
 ### 5. 错误路径

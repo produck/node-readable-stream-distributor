@@ -14,8 +14,6 @@ export default class ForkedReadableStream extends ReadableStream {
     let _controller;
 
     super({
-      // start runs synchronously inside super() while `this` is in the TDZ,
-      // so the controller is bridged via a local variable.
       start: (controller) => {
         _controller = controller;
       },

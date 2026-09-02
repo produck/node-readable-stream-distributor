@@ -1,19 +1,25 @@
-import AbstractChunkReader from './ChunkReader/Abstract.mjs';
-import { I, $I, _I } from './ChunkReader/Symbol.mjs';
+import { I } from './ChunkReader/Symbol.mjs';
+import * as ChunkReader from './ChunkReader/index.mjs';
 
-export class BufferChunkReader extends AbstractChunkReader {
-  [_I.INITIALIZE]() {
-    // Sync init: memory-backed reader has no async barrier.
-    return undefined;
-  }
+export class BufferChunkReader extends ChunkReader.Abstract {
+  [ChunkReader._I.INITIALIZE]() {}
+  [ChunkReader._I.CLOSE]() {}
 
-  async [_I.READ]() {
-    const index = this[$I.PROGRESS] + this[I.CONSUMED];
+  async [ChunkReader._I.READ]() {
+    const index = this[ChunkReader.$I.PROGRESS] + this[I.CONSUMED];
+    const chunkStash = this[ChunkReader.$I.CHUNK_STASH];
 
-    if (index >= this[$I.CHUNK_STASH].length) {
+    if (index >= chunkStash.length) {
       return { done: true };
     }
 
-    return { value: this[$I.CHUNK_STASH].get(index), done: false };
+    return { value: chunkStash.get(index), done: false };
+  }
+
+  async [ChunkReader._I.SEEK]() {
+    return (
+      this[ChunkReader.$I.PROGRESS] + this[I.CONSUMED] >=
+      this[ChunkReader.$I.CHUNK_STASH].length
+    );
   }
 }
