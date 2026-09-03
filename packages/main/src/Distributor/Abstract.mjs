@@ -5,19 +5,18 @@ import Abstract, { Member as M } from '@produck/es-abstract';
 import { I, $I, _S } from './Symbol.mjs';
 import { NonNegativeInteger } from './Parser.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
+import * as ChunkStash from './ChunkStash/index.mjs';
 
 class ReadableStreamDistributor extends EventTarget {
   [I.SOURCE_READER] = null;
-  [I.BUFFER] = [];
-  [I.BUFFER_SIZE] = 0;
-  [$I.COPIES] = new Set();
-  [I.COMMITTED_CHUNKS] = 0;
+  [I.BUFFER_STASH] = new ChunkStash.Concrete();
   [I.IN_FILE_PHASE] = false;
   [I.DESTROYED] = false;
   [I.PULLING] = null;
   [I.SOURCE_DONE] = false;
   [I.SOURCE_ERROR] = null;
   [I.TOTAL_CHUNKS] = 0;
+  [$I.REGISTRY] = new Set();
 
   static [_S.HIGH_WATER_MARK]() {
     return os.freemem();
@@ -55,12 +54,12 @@ class ReadableStreamDistributor extends EventTarget {
       throw new Error('Distributor has been destroyed');
     }
 
-    const copy = new ForkedReadableStream.Concrete(this, options.label);
+    const forked = new ForkedReadableStream.Concrete(this, options.label);
 
-    this[$I.COPIES].add(copy);
+    this[$I.REGISTRY].add(forked);
     this.dispatchEvent(new Event('fork'));
 
-    return copy;
+    return forked;
   }
 
   destroy() {

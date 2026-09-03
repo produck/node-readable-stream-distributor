@@ -27,7 +27,7 @@ export default class ForkedReadableStream extends ReadableStream {
         }
 
         this[I.CANCELLED] = true;
-        this[I.DISTRIBUTOR][DistributorSymbol.$I.COPIES].delete(this);
+        this[I.DISTRIBUTOR][DistributorSymbol.$I.REGISTRY].delete(this);
 
         // TODO: if all copies gone → cancel source reader
       },

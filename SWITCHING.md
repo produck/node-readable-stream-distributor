@@ -29,7 +29,7 @@
 | --------------------------------- | ------------------------------------- |
 | source reader                     | 仅分发器（唯一 source 消费者）        |
 | `Buffer[]`                        | 分发器写；拷贝经自己的 ChunkReader 读 |
-| 文件 / committedChunks            | 分发器唯一 writer                     |
+| 回退存储                          | 回退策略写入（分发器触发 dump）       |
 | 阶段状态（memory/switching/file） | 分发器                                |
 | 拷贝集                            | 分发器；拷贝经保护契约注销            |
 
@@ -65,7 +65,7 @@ Promise"这一事实：
 
 ```text
 同 tick（同步）：
-  读各拷贝 consumedChunks → 构造 FileChunkReader(init, skipN, committed)
+  读各拷贝 consumedChunks → 构造 FileChunkReader(init, skipN)
     → 换入 $I.CHUNK_READER（全部拷贝）
 之后（异步）：
   init 链：dump → skip 到位 → 就绪

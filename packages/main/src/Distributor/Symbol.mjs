@@ -3,9 +3,7 @@ import { deepFreeze } from '@produck/deep-freeze-enumerable';
 const I_CONSTRUCTOR = Symbol('.#constructor');
 const I_SOURCE = Symbol('.#source');
 const I_SOURCE_READER = Symbol('.#sourceReader');
-const I_BUFFER = Symbol('.#buffer');
-const I_BUFFER_SIZE = Symbol('.#bufferSize');
-const I_COMMITTED_CHUNKS = Symbol('.#committedChunks');
+const I_BUFFER_STASH = Symbol('.#bufferStash');
 const I_IN_FILE_PHASE = Symbol('.#inFilePhase');
 const I_DESTROYED = Symbol('.#destroyed');
 const I_PULLING = Symbol('.#pulling');
@@ -17,9 +15,7 @@ export const I = deepFreeze({
   CONSTRUCTOR: I_CONSTRUCTOR,
   SOURCE: I_SOURCE,
   SOURCE_READER: I_SOURCE_READER,
-  BUFFER: I_BUFFER,
-  BUFFER_SIZE: I_BUFFER_SIZE,
-  COMMITTED_CHUNKS: I_COMMITTED_CHUNKS,
+  BUFFER_STASH: I_BUFFER_STASH,
   IN_FILE_PHASE: I_IN_FILE_PHASE,
   DESTROYED: I_DESTROYED,
   PULLING: I_PULLING,
@@ -28,10 +24,10 @@ export const I = deepFreeze({
   TOTAL_CHUNKS: I_TOTAL_CHUNKS,
 });
 
-const $I_COPIES = Symbol('.$copies');
+const $I_REGISTRY = Symbol('.$registry');
 
 export const $I = deepFreeze({
-  COPIES: $I_COPIES,
+  REGISTRY: $I_REGISTRY,
 });
 
 const S_HIGH_WATER_MARK = Symbol('._highWaterMark()');

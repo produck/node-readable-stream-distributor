@@ -273,19 +273,20 @@ sequenceDiagram
 
 ## 读写协调
 
-多拷贝 reader + 单一 writer 共享同一临时文件。
-无需 `fcntl`、文件锁、OS 级协调。
+分发器不感知"落盘"——写入回退存储是**回退策略**的实现细节（呼应
+BROWSER.md：分发器不 embody 文件系统概念）。分发器不维护
+`committedChunks` 之类的落盘水位。
 
-三层保障：
+各层自我管理边界：
 
-1. **JS 单线程 + await**——`write` 之后的 `committedChunks++`
-   一定在数据到达内核页缓存后执行；reader 的 `read` 在
-   水位线未到前不会跨过 `await`
-2. **libuv 线程池**——`write()` 阻塞直到内核接受数据
-3. **OS 页缓存一致性**——不同 fd 读同一偏移量，看到
-   write 完成后的数据
+- **内存阶段**：`ChunkStash`（`BUFFER_STASH`）管理自身 chunk 边界
+  （`length` / `byteLength`）。
+- **回退阶段**：回退存储管理自身已写记录边界；回退 reader 读到自己
+  存储的末尾即 `done`，无需分发器提供读水位。
 
-一个共享整数 `committedChunks` + Promise 唤醒即足够。
+写读并发（回退策略内部，如文件）无需文件锁：JS 单线程 + `await`
+保证顺序，写入被内核接受后读才可见；不同 fd 读同一偏移量看到写
+完成后的数据。
 
 ## 引用计数生命周期
 
