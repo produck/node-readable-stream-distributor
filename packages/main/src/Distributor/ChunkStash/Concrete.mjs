@@ -26,6 +26,10 @@ export default class ChunkStash {
     this[I.BYTE_LENGTH] = 0;
   }
 
+  get dropped() {
+    return this[I.DROPPED];
+  }
+
   get length() {
     return this[I.CHUNKS].length;
   }

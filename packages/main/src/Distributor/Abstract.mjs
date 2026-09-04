@@ -10,7 +10,6 @@ import * as ChunkStash from './ChunkStash/index.mjs';
 class ReadableStreamDistributor extends EventTarget {
   [I.SOURCE_READER] = null;
   [I.BUFFER_STASH] = new ChunkStash.Concrete();
-  [I.IN_FILE_PHASE] = false;
   [I.DESTROYED] = false;
   [I.PULLING] = null;
   [I.SOURCE_DONE] = false;
@@ -39,6 +38,10 @@ class ReadableStreamDistributor extends EventTarget {
 
   get highWaterMark() {
     return this[I.CONSTRUCTOR].highWaterMark;
+  }
+
+  get degraded() {
+    return this[I.BUFFER_STASH].dropped;
   }
 
   fork(options) {

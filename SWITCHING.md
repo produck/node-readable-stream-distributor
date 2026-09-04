@@ -29,7 +29,7 @@
 | --------------------------------- | ------------------------------------- |
 | source reader                     | 仅分发器（唯一 source 消费者）        |
 | `Buffer[]`                        | 分发器写；拷贝经自己的 ChunkReader 读 |
-| 回退存储                          | 回退策略写入（分发器触发 dump）       |
+| 降级存储                          | 降级策略写入（分发器触发 dump）       |
 | 阶段状态（memory/switching/file） | 分发器                                |
 | 拷贝集                            | 分发器；拷贝经保护契约注销            |
 
@@ -90,57 +90,57 @@ Promise"这一事实：
 ## 分发器与 ChunkReader 构造协议（已明确）
 
 > 2026-08-26 设计讨论修订：移除分发器 `id`；转存职责移到
-> `AbstractFallbackChunkReader` 静态侧（`_S.DUMP` + `dump()`）；
+> `AbstractDegradedChunkReader` 静态侧（`_S.DUMP` + `dump()`）；
 > 不设 `_I.OPEN`。下文标注"已认可"的为定稿方向，其余待定。
 
 - **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 UUID
   作为唯一标识（构造时生成），供存储工件唯一命名。
   **已移除**（已认可，2026-08-26）：分发器不承担标识职能。ChunkStash
-  作为数据制品层承担数据职责；若某个回退方案需要字符串 `id`，那是
-  该回退方案（下游）的责任，`DUMP` 逻辑自理。
+  作为数据制品层承担数据职责；若某个降级方案需要字符串 `id`，那是
+  该降级方案（下游）的责任，`DUMP` 逻辑自理。
 - **构造上下文**：分发器创建 ChunkReader 时提供共享 `chunkStash` 与
   `progress`（该拷贝 `consumedChunks`，skip 位置）。`BufferChunkReader`
-  直接读 `chunkStash`；回退读取器切换时由静态转存执行 `drop()`。
+  直接读 `chunkStash`；降级读取器切换时由静态转存执行 `drop()`。
   reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
-  目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属回退
+  目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属降级
   策略内部细节。
-- **`AbstractFallbackChunkReader` 抽象中间层**：回退读取器家族的统一
+- **`AbstractDegradedChunkReader` 抽象中间层**：降级读取器家族的统一
   基类。转存职责在**静态侧**：
   - 抽象静态成员 `_S.DUMP`（已认可）：**靠参数拿到 `chunkStash`**，
-    负责转存 ChunkStash 数据到回退存储并执行 `stash.drop()`。返回
+    负责转存 ChunkStash 数据到降级存储并执行 `stash.drop()`。返回
     **PromiseOr**（已认可）。
   - 配套公开静态成员 `dump()`（已认可命名）：调用 `_S.DUMP`，把
     返回值 **Promisify** 并做**抽象层异常处理修饰**，将生成的
     Promise 记录到 `S.DUMPING`（WeakMap）上（已认可）。
-  - 静态成员 `S.DUMPING`（已认可）：Fallback 抽象层自持的 WeakMap，
+  - 静态成员 `S.DUMPING`（已认可）：Degraded 抽象层自持的 WeakMap，
     管理 `_S.DUMP` 返回的东西（`ChunkStash` ↔ 转存 Promise）。
   - 实例级查询成员 `getChunkStashDumping()`（已认可）：实例读取器
     从 `S.DUMPING` 查询其 `ChunkStash` 对应的转存 Promise。
   - 【待定：实例如何访问静态 `S.DUMPING`（如 `this.constructor`）；
     异常处理修饰的具体形式（错误包装/类型）】
-  - **Fallback 自定义资源可自备 WeakMap**（已认可）：转存后副作用
-    （产物）经回退策略自备的 WeakMap 机制传递给实例读取器。例如
-    文件回退在 `DUMP` 时自行生成 uuid 或文件名；`id` / 文件名等是
-    回退策略自己的内部细节，非分发器职责。
-  - 实例级回退读取器构造时经受保护 `$I.CHUNK_STASH` 持有共享
+  - **Degraded 自定义资源可自备 WeakMap**（已认可）：转存后副作用
+    （产物）经降级策略自备的 WeakMap 机制传递给实例读取器。例如
+    文件降级在 `DUMP` 时自行生成 uuid 或文件名；`id` / 文件名等是
+    降级策略自己的内部细节，非分发器职责。
+  - 实例级降级读取器构造时经受保护 `$I.CHUNK_STASH` 持有共享
     `chunkStash`（已认可：维持受保护、不新增符号，构造阶段与
     `AbstractChunkReader` 协议对齐），**所有初始化过程都 await
     dumping**（已认可）。
   - **`await dumping` 只提供阻塞，不提供产物**（已认可）：它是转存
     完成的屏障。时序为分发器先执行静态 `dump()`，再并发 `new`
     实例，再并发开始初始化；初始化中的 `await this.getChunkStashDumping()`
-    自然等待转存完成；若转存已完成则直接通过。产物传递走回退策略
+    自然等待转存完成；若转存已完成则直接通过。产物传递走降级策略
     自备的 WeakMap，与 dumping 屏障解耦。
-  - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类 Fallback 的领域
+  - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类降级的领域
     术语，抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
   - 【待定：`_S.DUMP` 返回的 Promise resolve 值（转存产物）的结构；
     实例侧 `_I.INITIALIZE` / `_I.READ` 具体签名】
 - **TemporaryFileChunkReader**（未来）：临时文件目录通过**配置方法 +
   默认实现**提供，属子类职责，非分发器维护。它是
-  `AbstractFallbackChunkReader` 的 Node 文件系统实现；浏览器分支
+  `AbstractDegradedChunkReader` 的 Node 文件系统实现；浏览器分支
   （IndexedDB / OPFS）同挂其下。
-- **动态替换回退 reader 类**：分发器提供"设置回退 ChunkReader 类"的
-  方法，可动态替换存储降级阶段使用的 reader 子类（"回退策略读取器
+- **动态替换降级 reader 类**：分发器提供"设置降级 ChunkReader 类"的
+  方法，可动态替换存储降级阶段使用的 reader 子类（"降级策略读取器
   机制"，呼应 BROWSER.md 存储降级策略抽象）。
 
 ## 背景与目标
@@ -170,8 +170,8 @@ Promise"这一事实：
 
 - [x] dump 进行中，拷贝 pull 从 BufferReader 读 → 半截数据
       已解：同 tick 换读器后无拷贝再碰 buffer。
-- [x] 回退读取器在 dump 完成前读取 → 读到不完整/半截数据
-      已解（框架层落定 2026-08-28）：`AbstractFallbackChunkReader`
+- [x] 降级读取器在 dump 完成前读取 → 读到不完整/半截数据
+      已解（框架层落定 2026-08-28）：`AbstractDegradedChunkReader`
       的 `_I.INITIALIZE` await dumping 屏障（`S.DUMPING`），`read()` /
       `close()` await `I.INITIALIZED`，转存完成前绝不读；所有消费者
       共享同一 Promise 屏障，dump 失败统一转义并传播给所有（含迟到）
@@ -200,9 +200,9 @@ Promise"这一事实：
 ### 4. FileChunkReader 接口
 
 - 构造：分发器传 `{ progress, chunkStash }` 上下文（`id` 已移除，
-  属回退策略内部细节）；文件句柄等存储要素由子类自建
-  （TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。回退
-  读取器继承 `AbstractFallbackChunkReader`，实现 `_S.DUMP` 及继承的
+  属降级策略内部细节）；文件句柄等存储要素由子类自建
+  （TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。降级
+  读取器继承 `AbstractDegradedChunkReader`，实现 `_S.DUMP` 及继承的
   `_I.READ` / `_I.SEEK` / `_I.CLOSE`。
 - `_I.READ` 按 position 游标前进（读 body）；`_I.SEEK` 只读 4B 头并
   前进游标（不读 body），供 `skip()` 定位。

@@ -22,7 +22,7 @@ spillover is one implementation of a **storage degradation strategy layer**.
 The `ChunkReader` hierarchy already reflects this split:
 
 - `BufferChunkReader` reads the shared `ChunkStash` directly (memory path).
-- `AbstractFallbackChunkReader` is the degradation branch. Dumping lives on
+- `AbstractDegradedChunkReader` is the degradation branch. Dumping lives on
   the static side: `_S.DUMP(chunkStash)` (returns PromiseOr, normalized to
   a Promise) transfers the stash and drops it; `dump()` records the dumping
   Promise in the static `S.DUMPING` WeakMap, and instance readers

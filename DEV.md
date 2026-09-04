@@ -302,3 +302,20 @@
 - `BufferChunkReader` 实现 `_I.SEEK`（越界判断 O(1)，不读数据）；
   文件回退 reader 的 `_I.SEEK` 只读 4B 头 + 前进游标（不读 body），
   skip 效率优化留在具体实现（线性变长结构 + 偏移索引待定）。
+
+## 2026-09-03
+
+### Fallback → Degraded 术语统一
+
+- 将"回退（Fallback）"语系统一为"降级（Degraded）"：代码与正式
+  设计文档与 BROWSER.md 的 **storage degradation strategy layer**
+  术语对齐（原 Fallback 与 BROWSER.md 的 degradation 不一致）。
+- `FallbackChunkReader/` → `DegradedChunkReader/`（git mv 保留历史）；
+  `AbstractFallbackChunkReader` → `AbstractDegradedChunkReader`；
+  Distributor 导出名同步。操作名 `dump` / `S.DUMPING` / `_S.DUMP`
+  不变。
+- DESIGN.md / SWITCHING.md / BROWSER.md 中的类名、目录名与"回退"
+  概念词改为 Degraded/降级。DEV.md 历史段（08-20 ~ 08-28）保留原词
+  作为演进记录。
+- 对外可观察状态采用 `degraded`（代理 `BUFFER_STASH.dropped`），
+  避免臆造词（如 `fallbacked`）与文件特定命名（如 `inFilePhase`）。

@@ -116,8 +116,8 @@ graph TD
 | `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现    |
 | `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，`drop()` 一次性清空并密封               |
 | `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                    |
-| `AbstractFallbackChunkReader` | 回退读取器抽象中间层——静态转存（`_S.DUMP` + `S.DUMPING`），不绑定存储 |
-| `TemporaryFileChunkReader`    | （未来）文件阶段——回退抽象层的 Node 文件系统实现                      |
+| `AbstractDegradedChunkReader` | 降级读取器抽象中间层——静态转存（`_S.DUMP` + `S.DUMPING`），不绑定存储 |
+| `TemporaryFileChunkReader`    | （未来）文件阶段——降级抽象层的 Node 文件系统实现                      |
 | chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                                  |
 
 ### 目录安排约定
@@ -144,11 +144,11 @@ Distributor/
     Abstract.mjs
     index.mjs
     Symbol.mjs
-  FallbackChunkReader/  # AbstractFallbackChunkReader（子类，与 ChunkReader/ 平行）
+  DegradedChunkReader/  # AbstractDegradedChunkReader（子类，与 ChunkReader/ 平行）
     Abstract.mjs        # 抽象中间层
     index.mjs
     Symbol.mjs
-  TemporaryFile/        # （未来）TemporaryFileChunkReader（子类，与 FallbackChunkReader/ 平行）
+  TemporaryFile/        # （未来）TemporaryFileChunkReader（子类，与 DegradedChunkReader/ 平行）
     Concrete.mjs
     index.mjs
     Symbol.mjs
@@ -216,30 +216,30 @@ interface ChunkReader {
 ```mermaid
 graph BT
     BufferChunkReader["BufferChunkReader<br/>直接读共享 ChunkStash"]
-    AbstractFallbackChunkReader["AbstractFallbackChunkReader<br/>回退切换公共动作"]
-    TemporaryFileChunkReader["TemporaryFileChunkReader<br/>文件回退实现（未来）"]
+    AbstractDegradedChunkReader["AbstractDegradedChunkReader<br/>降级切换公共动作"]
+    TemporaryFileChunkReader["TemporaryFileChunkReader<br/>文件降级实现（未来）"]
     AbstractChunkReader["AbstractChunkReader<br/>生命周期/进度/初始化屏障"]
     BufferChunkReader --> AbstractChunkReader
-    AbstractFallbackChunkReader --> AbstractChunkReader
-    TemporaryFileChunkReader --> AbstractFallbackChunkReader
+    AbstractDegradedChunkReader --> AbstractChunkReader
+    TemporaryFileChunkReader --> AbstractDegradedChunkReader
 ```
 
 - `BufferChunkReader` 直接消费共享 `ChunkStash`（按 index 读，`done`
   由 `stash.length` 决定），是内存路径分支。
-- `AbstractFallbackChunkReader` 是回退读取器家族的抽象中间层。转存
+- `AbstractDegradedChunkReader` 是降级读取器家族的抽象中间层。转存
   职责在**静态侧**：
   - `_S.DUMP(chunkStash)` — 抽象静态，返回 PromiseOr（会被转为
-    Promise），转存 ChunkStash 到回退存储并执行 `stash.drop()`。
+    Promise），转存 ChunkStash 到降级存储并执行 `stash.drop()`。
   - `dump(chunkStash)` — 公开静态，调用 `_S.DUMP`，Promisify 并做
     抽象层异常处理修饰，将生成的 Promise 记录到 `S.DUMPING`（静态
     WeakMap：`ChunkStash` ↔ 转存 Promise）。
   - `getChunkStashDumping()` — 实例级成员，从 `S.DUMPING` 查询本实例
     `ChunkStash` 的转存 Promise；初始化过程 `await` 它（仅阻塞，
     不提供产物）。
-  - 转存产物经回退策略自备的 WeakMap 传递；`id` / 文件名等是回退
+  - 转存产物经降级策略自备的 WeakMap 传递；`id` / 文件名等是降级
     策略内部细节，非分发器职责。
   - **不设 `_I.OPEN`**：抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
-- `TemporaryFileChunkReader` 是 `AbstractFallbackChunkReader` 的 Node
+- `TemporaryFileChunkReader` 是 `AbstractDegradedChunkReader` 的 Node
   文件系统实现；浏览器分支（IndexedDB / OPFS）同挂其下。
 
 ### 切换流程
@@ -273,7 +273,7 @@ sequenceDiagram
 
 ## 读写协调
 
-分发器不感知"落盘"——写入回退存储是**回退策略**的实现细节（呼应
+分发器不感知"落盘"——写入降级存储是**降级策略**的实现细节（呼应
 BROWSER.md：分发器不 embody 文件系统概念）。分发器不维护
 `committedChunks` 之类的落盘水位。
 
@@ -281,10 +281,10 @@ BROWSER.md：分发器不 embody 文件系统概念）。分发器不维护
 
 - **内存阶段**：`ChunkStash`（`BUFFER_STASH`）管理自身 chunk 边界
   （`length` / `byteLength`）。
-- **回退阶段**：回退存储管理自身已写记录边界；回退 reader 读到自己
+- **降级阶段**：降级存储管理自身已写记录边界；降级 reader 读到自己
   存储的末尾即 `done`，无需分发器提供读水位。
 
-写读并发（回退策略内部，如文件）无需文件锁：JS 单线程 + `await`
+写读并发（降级策略内部，如文件）无需文件锁：JS 单线程 + `await`
 保证顺序，写入被内核接受后读才可见；不同 fd 读同一偏移量看到写
 完成后的数据。
 

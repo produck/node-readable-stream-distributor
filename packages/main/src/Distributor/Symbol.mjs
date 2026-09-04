@@ -4,7 +4,6 @@ const I_CONSTRUCTOR = Symbol('.#constructor');
 const I_SOURCE = Symbol('.#source');
 const I_SOURCE_READER = Symbol('.#sourceReader');
 const I_BUFFER_STASH = Symbol('.#bufferStash');
-const I_IN_FILE_PHASE = Symbol('.#inFilePhase');
 const I_DESTROYED = Symbol('.#destroyed');
 const I_PULLING = Symbol('.#pulling');
 const I_SOURCE_DONE = Symbol('.#sourceDone');
@@ -16,7 +15,6 @@ export const I = deepFreeze({
   SOURCE: I_SOURCE,
   SOURCE_READER: I_SOURCE_READER,
   BUFFER_STASH: I_BUFFER_STASH,
-  IN_FILE_PHASE: I_IN_FILE_PHASE,
   DESTROYED: I_DESTROYED,
   PULLING: I_PULLING,
   SOURCE_DONE: I_SOURCE_DONE,

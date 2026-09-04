@@ -7,7 +7,7 @@ import { I, S, _S } from './Symbol.mjs';
 function catchDumpError(cause) {
   Ow.Error.Common('Failed to dump the ChunkStash.', { cause });
 }
-class AbstractFallbackChunkReader extends ChunkReader.Abstract {
+class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   static [S.DUMPING] = new WeakMap();
 
   constructor(...args) {
@@ -35,7 +35,7 @@ class AbstractFallbackChunkReader extends ChunkReader.Abstract {
 }
 
 export default Abstract(
-  AbstractFallbackChunkReader,
+  AbstractDegradedChunkReader,
   Abstract.Static({
     [_S.DUMP]: M.Method(),
   }),
