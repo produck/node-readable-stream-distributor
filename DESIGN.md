@@ -421,35 +421,25 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
 
 ## 可观测性
 
+分发器不维护统一的状态快照，也不暴露 `stats` 之类的聚合对象：可观察
+信号按数据归属分散在组件与受保护成员上。
+
+- 内存缓冲当前字节 / 块数：`BUFFER_STASH`（ChunkStash）的
+  `byteLength` / `length`，由缓冲容器自管。
+- 是否进入降级：`distributor.degraded`（代理 `BUFFER_STASH.dropped`）。
+- 当前活跃 fork 集合：`$I.REGISTRY`（活跃数即 `size`）。
+- 落盘 / 存储侧水位：降级 reader 与存储策略自管，分发器不感知。
+
 ### 生命周期事件
 
-分发过程各节点均暴露事件，下游可零侵入接入日志与监控：
+分发器是 `EventTarget`，当前已派发：
 
-| 事件                | 含义                                   |
-| ------------------- | -------------------------------------- |
-| `copy:registered`   | 新拷贝上线，携带 `label`               |
-| `copy:done`         | 拷贝正常消费完毕，自动清理             |
-| `copy:cancelled`    | 拷贝被 cancel                          |
-| `copy:unregistered` | 显式调用 unregister                    |
-| `source:done`       | 源流正常结束                           |
-| `source:error`      | 源流出错                               |
-| `all:empty`         | 所有拷贝离开，分发器释放               |
-| `destroy`           | 强制销毁，拷贝耗尽已缓冲数据后 → error |
+| 事件      | 含义           |
+| --------- | -------------- |
+| `fork`    | 新 fork 上线   |
+| `destroy` | 强制销毁被调用 |
 
-### 统计
-
-只读 `stats` 对象，实现成本极低：
-
-```js
-distributor.stats  // →
-{
-  bytesBuffered,   // 当前 Buffer[] 字节数
-  bytesWritten,    // 已写入磁盘总字节数
-  totalChunks,     // 已处理 chunk 数
-  activeCopies,    // 当前活跃拷贝数
-  peakCopies,      // 历史峰值拷贝数
-}
-```
+源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。
 
 ## 非目标
 

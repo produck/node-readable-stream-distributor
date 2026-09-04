@@ -8,7 +8,6 @@ const I_DESTROYED = Symbol('.#destroyed');
 const I_PULLING = Symbol('.#pulling');
 const I_SOURCE_DONE = Symbol('.#sourceDone');
 const I_SOURCE_ERROR = Symbol('.#sourceError');
-const I_TOTAL_CHUNKS = Symbol('.#totalChunks');
 
 export const I = deepFreeze({
   CONSTRUCTOR: I_CONSTRUCTOR,
@@ -19,7 +18,6 @@ export const I = deepFreeze({
   PULLING: I_PULLING,
   SOURCE_DONE: I_SOURCE_DONE,
   SOURCE_ERROR: I_SOURCE_ERROR,
-  TOTAL_CHUNKS: I_TOTAL_CHUNKS,
 });
 
 const $I_REGISTRY = Symbol('.$registry');

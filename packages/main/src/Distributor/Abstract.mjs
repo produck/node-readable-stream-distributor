@@ -16,7 +16,6 @@ class ReadableStreamDistributor extends EventTarget {
   [I.PULLING] = null;
   [I.SOURCE_DONE] = false;
   [I.SOURCE_ERROR] = null;
-  [I.TOTAL_CHUNKS] = 0;
 
   [$I.REGISTRY] = new Set();
 
