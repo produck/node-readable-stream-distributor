@@ -1,5 +1,3 @@
-import * as DistributorSymbol from '../Symbol.mjs';
-
 import { I, $I } from './Symbol.mjs';
 
 export default class ForkedReadableStream extends ReadableStream {
@@ -7,7 +5,7 @@ export default class ForkedReadableStream extends ReadableStream {
   [I.DISTRIBUTOR];
   [I.CONTROLLER];
   [I.CHUNK_READER] = null;
-  [I.CANCELLED] = false;
+  [$I.CANCELLED] = false;
   [I.DONE] = false;
 
   constructor(distributor, label) {
@@ -22,14 +20,11 @@ export default class ForkedReadableStream extends ReadableStream {
         // TODO: pull chunk from distributor and enqueue
       },
       cancel: () => {
-        if (this[I.CANCELLED]) {
+        if (this[$I.CANCELLED]) {
           return;
         }
 
-        this[I.CANCELLED] = true;
-        this[I.DISTRIBUTOR][DistributorSymbol.$I.REGISTRY].delete(this);
-
-        // TODO: if all copies gone → cancel source reader
+        this[$I.CANCELLED] = true;
       },
     });
 

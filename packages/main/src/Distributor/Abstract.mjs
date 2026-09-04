@@ -3,11 +3,11 @@ import * as os from 'node:os';
 import { ThrowTypeError } from '@produck/type-error';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
+import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
+import * as ChunkStash from './ChunkStash/index.mjs';
 import { isReadableStreamLike } from './Checker.mjs';
 import { I, $I, _S } from './Symbol.mjs';
 import { NonNegativeInteger } from './Parser.mjs';
-import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
-import * as ChunkStash from './ChunkStash/index.mjs';
 
 class ReadableStreamDistributor extends EventTarget {
   [I.SOURCE_READER] = null;
@@ -17,6 +17,7 @@ class ReadableStreamDistributor extends EventTarget {
   [I.SOURCE_DONE] = false;
   [I.SOURCE_ERROR] = null;
   [I.TOTAL_CHUNKS] = 0;
+
   [$I.REGISTRY] = new Set();
 
   static [_S.HIGH_WATER_MARK]() {
@@ -69,6 +70,14 @@ class ReadableStreamDistributor extends EventTarget {
     this.dispatchEvent(new Event('fork'));
 
     return forked;
+  }
+
+  [$I.PRUNE]() {
+    for (const forked of this[$I.REGISTRY]) {
+      if (forked[ForkedReadableStream.$I.CANCELLED]) {
+        this[$I.REGISTRY].delete(forked);
+      }
+    }
   }
 
   destroy() {

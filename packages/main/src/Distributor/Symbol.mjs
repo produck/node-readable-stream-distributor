@@ -23,9 +23,11 @@ export const I = deepFreeze({
 });
 
 const $I_REGISTRY = Symbol('.$registry');
+const $I_PRUNE = Symbol('.$prune()');
 
 export const $I = deepFreeze({
   REGISTRY: $I_REGISTRY,
+  PRUNE: $I_PRUNE,
 });
 
 const S_HIGH_WATER_MARK = Symbol('._highWaterMark()');
