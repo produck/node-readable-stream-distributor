@@ -1,7 +1,9 @@
 import * as os from 'node:os';
 
+import { ThrowTypeError } from '@produck/type-error';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
+import { isReadableStreamLike } from './Checker.mjs';
 import { I, $I, _S } from './Symbol.mjs';
 import { NonNegativeInteger } from './Parser.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
@@ -28,6 +30,10 @@ class ReadableStreamDistributor extends EventTarget {
   constructor(source) {
     super();
 
+    if (!isReadableStreamLike(source)) {
+      ThrowTypeError('source', 'a WHATWG ReadableStream');
+    }
+
     if (source.locked) {
       throw new Error('Source stream must not be locked');
     }
@@ -46,11 +52,11 @@ class ReadableStreamDistributor extends EventTarget {
 
   fork(options) {
     if (typeof options !== 'object' || options === null) {
-      throw new TypeError('options must be an object');
+      ThrowTypeError('options', 'an object');
     }
 
     if (typeof options.label !== 'string') {
-      throw new TypeError('options.label must be a string');
+      ThrowTypeError('options.label', 'a string');
     }
 
     if (this[I.DESTROYED]) {

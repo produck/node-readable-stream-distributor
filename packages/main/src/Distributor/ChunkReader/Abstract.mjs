@@ -1,4 +1,5 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
+import { ThrowTypeError } from '@produck/type-error';
 
 import { I, $I, _I } from './Symbol.mjs';
 
@@ -54,7 +55,7 @@ class AbstractChunkReader {
 
   async skip(n = 1) {
     if (!Number.isInteger(n) || n < 0) {
-      throw new TypeError('n must be a non-negative integer');
+      ThrowTypeError('n', 'a non-negative integer');
     }
 
     for (let i = 0; i < n; i++) {
