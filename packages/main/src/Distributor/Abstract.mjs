@@ -1,22 +1,19 @@
 import * as os from 'node:os';
 
+import * as Ow from '@produck/ow';
 import { ThrowTypeError } from '@produck/type-error';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 import * as ChunkStash from './ChunkStash/index.mjs';
+import * as SourceReader from './SourceReader/index.mjs';
 import { isReadableStreamLike } from './Checker.mjs';
 import { I, $I, _S } from './Symbol.mjs';
 import { NonNegativeInteger } from './Parser.mjs';
 
 class ReadableStreamDistributor extends EventTarget {
-  [I.SOURCE_READER] = null;
   [I.BUFFER_STASH] = new ChunkStash.Concrete();
   [I.DESTROYED] = false;
-  [I.PULLING] = null;
-  [I.SOURCE_DONE] = false;
-  [I.SOURCE_ERROR] = null;
-
   [$I.REGISTRY] = new Set();
 
   static [_S.HIGH_WATER_MARK]() {
@@ -35,11 +32,11 @@ class ReadableStreamDistributor extends EventTarget {
     }
 
     if (source.locked) {
-      throw new Error('Source stream must not be locked');
+      Ow.Error.Common('Source stream must not be locked');
     }
 
     this[I.CONSTRUCTOR] = new.target;
-    this[I.SOURCE] = source;
+    this[I.SOURCE_READER] = new SourceReader.Concrete(source);
   }
 
   get highWaterMark() {
@@ -60,7 +57,7 @@ class ReadableStreamDistributor extends EventTarget {
     }
 
     if (this[I.DESTROYED]) {
-      throw new Error('Distributor has been destroyed');
+      Ow.Error.Common('Distributor has been destroyed');
     }
 
     const forked = new ForkedReadableStream.Concrete(this, options.label);
@@ -84,7 +81,7 @@ class ReadableStreamDistributor extends EventTarget {
     this.dispatchEvent(new Event('destroy'));
 
     // TODO: stop pulling, error copies after drain, release source reader
-    throw new Error('Not implemented');
+    Ow.Error.Common('Not implemented');
   }
 }
 
