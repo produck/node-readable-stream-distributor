@@ -25,8 +25,17 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     return dumping;
   }
 
+  static async write(chunkStash, buffer) {
+    await this.getDumping(chunkStash);
+    await this[_S.WRITE](chunkStash, buffer);
+  }
+
+  static getDumping(chunkStash) {
+    return this[S.DUMPING].get(chunkStash);
+  }
+
   getChunkStashDumping() {
-    return this[I.CONSTRUCTOR][S.DUMPING].get(this[ChunkReader.$I.CHUNK_STASH]);
+    return this[I.CONSTRUCTOR].getDumping(this[ChunkReader.$I.CHUNK_STASH]);
   }
 
   [ChunkReader._I.INITIALIZE]() {
@@ -38,5 +47,6 @@ export default Abstract(
   AbstractDegradedChunkReader,
   Abstract.Static({
     [_S.DUMP]: M.Method(),
+    [_S.WRITE]: M.Method(),
   }),
 );

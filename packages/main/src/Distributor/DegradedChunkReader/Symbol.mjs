@@ -13,7 +13,9 @@ export const S = deepFreeze({
 });
 
 const _S_DUMP = Symbol('._dump()');
+const _S_WRITE = Symbol('._write()');
 
 export const _S = deepFreeze({
   DUMP: _S_DUMP,
+  WRITE: _S_WRITE,
 });
