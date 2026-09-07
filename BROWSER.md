@@ -22,16 +22,19 @@ spillover is one implementation of a **storage degradation strategy layer**.
 The `ChunkReader` hierarchy already reflects this split:
 
 - `BufferChunkReader` reads the shared `ChunkStash` directly (memory path).
-- `AbstractDegradedChunkReader` is the degradation branch. Dumping lives on
-  the static side: `_S.DUMP(chunkStash)` (returns PromiseOr, normalized to
-  a Promise) transfers the stash and drops it; `dump()` records the dumping
-  Promise in the static `S.DUMPING` WeakMap, and instance readers
-  `await getChunkStashDumping()` during init. Concrete storages hang
-  beneath it via the inherited `_I.READ` / `_I.CLOSE` plus their own
-  WeakMap for dump side-effects.
+- `AbstractDegradedChunkReader` is the degradation branch's reader and its
+  instances only read. The write side lives on a paired internal abstract
+  `AbstractTransferrer`: concrete backends implement a `Transferrer`
+  subclass (`_I.DUMP` transfers the whole stash into the degraded target
+  and drops it; `_I.WRITE` appends live chunks) and hang its configured
+  instance on the concrete reader's one-time static `transferrer`. The
+  transferrer records a per-stash dumping Promise; reader instances await
+  it during init via the `chunkStashDumping` getter, so reads never see a
+  half-dumped target.
 
-The current shape already fits: `highWaterMark` + `tmpdir` are the two knobs
-downstream implements via the `_S` abstract members. A future refactor would:
+The current shape already fits: `highWaterMark` is the knob the distributor
+asks downstream for; the degradation backend is delivered as a reader +
+transferrer pair. A future refactor would:
 
 - Extract a strategy interface for the overflow store (write chunk records,
   read them back, clean up).
@@ -41,5 +44,6 @@ downstream implements via the `_S` abstract members. A future refactor would:
 
 ## Naming note
 
-`tmpdir` is filesystem-flavored naming. When the degradation strategy is
-abstracted, prefer a neutral name such as `overflowStore` / `spillStore`.
+`tmpdir` is filesystem-flavored naming. The write side is now realized as
+the medium-neutral `Transferrer` (dump the stash / append live chunks), so
+degradation never implies a specific storage medium.

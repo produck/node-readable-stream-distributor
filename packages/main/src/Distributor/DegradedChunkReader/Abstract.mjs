@@ -1,52 +1,47 @@
 import * as Ow from '@produck/ow';
-import Abstract, { Member as M } from '@produck/es-abstract';
+import { ThrowTypeError } from '@produck/type-error';
+import Abstract from '@produck/es-abstract';
 
 import * as ChunkReader from '../ChunkReader/index.mjs';
-import { I, S, _S } from './Symbol.mjs';
+import * as Transferrer from './Transferrer/index.mjs';
+import { I, S } from './Symbol.mjs';
 
-function catchDumpError(cause) {
-  Ow.Error.Common('Failed to dump the ChunkStash.', { cause });
-}
 class AbstractDegradedChunkReader extends ChunkReader.Abstract {
-  static [S.DUMPING] = new WeakMap();
-
   constructor(...args) {
     super(...args);
+
     this[I.CONSTRUCTOR] = new.target;
+
+    if (new.target.transferrer === undefined) {
+      Ow.Error.Common('A transferrer must be configured before instantiation');
+    }
   }
 
-  static dump(chunkStash) {
-    const dumping = Promise.resolve()
-      .then(() => this[_S.DUMP](chunkStash))
-      .catch(catchDumpError);
-
-    this[S.DUMPING].set(chunkStash, dumping);
-
-    return dumping;
+  static get transferrer() {
+    return this[S.TRANSFERRER];
   }
 
-  static async write(chunkStash, buffer) {
-    await this.getDumping(chunkStash);
-    await this[_S.WRITE](chunkStash, buffer);
+  static set transferrer(transferrer) {
+    if (this[S.TRANSFERRER] !== undefined) {
+      Ow.Error.Common('transferrer is already configured');
+    }
+
+    if (!(transferrer instanceof Transferrer.Abstract)) {
+      ThrowTypeError('transferrer', 'an AbstractTransferrer instance');
+    }
+
+    this[S.TRANSFERRER] = transferrer;
   }
 
-  static getDumping(chunkStash) {
-    return this[S.DUMPING].get(chunkStash);
-  }
-
-  getChunkStashDumping() {
-    return this[I.CONSTRUCTOR].getDumping(this[ChunkReader.$I.CHUNK_STASH]);
+  get chunkStashDumping() {
+    return this[I.CONSTRUCTOR].transferrer.getDumping(
+      this[ChunkReader.$I.CHUNK_STASH],
+    );
   }
 
   [ChunkReader._I.INITIALIZE]() {
-    return this.getChunkStashDumping();
+    return this.chunkStashDumping;
   }
 }
 
-export default Abstract(
-  AbstractDegradedChunkReader,
-  Abstract.Static({
-    [_S.DUMP]: M.Method(),
-    [_S.WRITE]: M.Method(),
-  }),
-);
+export default Abstract(AbstractDegradedChunkReader);

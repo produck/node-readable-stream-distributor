@@ -91,7 +91,7 @@ Promise"这一事实：
 
 `await dumping` 屏障的阻塞是**局部停靠**，不是全局阻塞：
 
-- **非全局阻塞**：`_S.DUMP` 为异步转存，不采用同步写/事件循环
+- **非全局阻塞**：transferrer 的 `dump()` 为异步转存，不采用同步写/事件循环
   阻塞；逐块 `await` 写盘时控制权让回事件循环，不饿死其他任务。
 - **局部停靠**：只有依赖降级数据、正 `await dumping` 的 reader 续延
   被挂起；仍在内存阶段或已追平的 fork 不受影响。
@@ -107,6 +107,12 @@ Promise"这一事实：
 > 2026-08-26 设计讨论修订：移除分发器 `id`；转存职责移到
 > `AbstractDegradedChunkReader` 静态侧（`_S.DUMP` + `dump()`）；
 > 不设 `_I.OPEN`。下文标注"已认可"的为定稿方向，其余待定。
+>
+> 2026-09-07 修订：转存职责迁出 reader——`AbstractDegradedChunkReader`
+> 回归纯读；写侧抽为独立 **Transferrer**（家族内部抽象实例：`dump` /
+> `write` / per-stash dumping），具体 reader 经一次性静态成员
+> `transferrer` 配置其配套 Transferrer 实例。原静态 `_S.DUMP` /
+> `S.DUMPING` / `getChunkStashDumping` 相应改为 Transferrer 成员。
 
 - **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 UUID
   作为唯一标识（构造时生成），供存储工件唯一命名。
@@ -115,40 +121,43 @@ Promise"这一事实：
   该降级方案（下游）的责任，`DUMP` 逻辑自理。
 - **构造上下文**：分发器创建 ChunkReader 时提供共享 `chunkStash` 与
   `progress`（该拷贝 `consumedChunks`，skip 位置）。`BufferChunkReader`
-  直接读 `chunkStash`；降级读取器切换时由静态转存执行 `drop()`。
+  直接读 `chunkStash`；降级时由配套 transferrer 的 `dump()` 执行 `drop()`。
   reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
   目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属降级
   策略内部细节。
-- **`AbstractDegradedChunkReader` 抽象中间层**：降级读取器家族的统一
-  基类。转存职责在**静态侧**：
-  - 抽象静态成员 `_S.DUMP`（已认可）：**靠参数拿到 `chunkStash`**，
-    负责转存 ChunkStash 数据到降级存储并执行 `stash.drop()`。返回
-    **PromiseOr**（已认可）。
-  - 配套公开静态成员 `dump()`（已认可命名）：调用 `_S.DUMP`，把
-    返回值 **Promisify** 并做**抽象层异常处理修饰**，将生成的
-    Promise 记录到 `S.DUMPING`（WeakMap）上（已认可）。
-  - 静态成员 `S.DUMPING`（已认可）：Degraded 抽象层自持的 WeakMap，
-    管理 `_S.DUMP` 返回的东西（`ChunkStash` ↔ 转存 Promise）。
-  - 实例级查询成员 `getChunkStashDumping()`（已认可）：实例读取器
-    从 `S.DUMPING` 查询其 `ChunkStash` 对应的转存 Promise。
-  - 【待定：实例如何访问静态 `S.DUMPING`（如 `this.constructor`）；
-    异常处理修饰的具体形式（错误包装/类型）】
-  - **Degraded 自定义资源可自备 WeakMap**（已认可）：转存后副作用
-    （产物）经降级策略自备的 WeakMap 机制传递给实例读取器。例如
-    文件降级在 `DUMP` 时自行生成 uuid 或文件名；`id` / 文件名等是
-    降级策略自己的内部细节，非分发器职责。
-  - 实例级降级读取器构造时经受保护 `$I.CHUNK_STASH` 持有共享
-    `chunkStash`（已认可：维持受保护、不新增符号，构造阶段与
-    `AbstractChunkReader` 协议对齐），**所有初始化过程都 await
-    dumping**（已认可）。
-  - **`await dumping` 只提供阻塞，不提供产物**（已认可）：它是转存
-    完成的屏障。时序为分发器先执行静态 `dump()`，再并发 `new`
-    实例，再并发开始初始化；初始化中的 `await this.getChunkStashDumping()`
-    自然等待转存完成；若转存已完成则直接通过。产物传递走降级策略
-    自备的 WeakMap，与 dumping 屏障解耦。
-  - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类降级的领域
-    术语，抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
-  - 【待定：`_S.DUMP` 返回的 Promise resolve 值（转存产物）的结构；
+- **`AbstractDegradedChunkReader` 抽象中间层（纯读）**：降级读取器家族
+  的统一基类。写侧不在本类（2026-09-07 迁往 Transferrer）：
+  - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`（已认可：
+    维持受保护、不新增符号，构造阶段与 `AbstractChunkReader` 协议
+    对齐），**所有初始化过程都 await dumping**（已认可）。
+  - **一次性静态成员 `transferrer`**（2026-09-07 定稿）：具体 reader
+    类须先配置一个 `AbstractTransferrer` 实例（守卫式 setter：一次性
+    不可变 + `instanceof AbstractTransferrer`）；未配置不能 `new`。
+    实例初始化经 `I.CONSTRUCTOR.transferrer` 取 dumping 屏障。
+  - **`chunkStashDumping`**（实例 getter，2026-09-07 定稿）：返回
+    `transferrer.getDumping(本 stash)`——即 dumping 屏障，仅阻塞、
+    不提供产物。
+  - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类降级的领域术语，
+    抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
+- **`AbstractTransferrer`（写侧内部抽象，2026-09-07 定稿）**：
+  - 公开实例 `dump(chunkStash)`：调用抽象 `_I.DUMP`，Promisify +
+    抽象层异常转义，登记 per-stash dumping Promise。
+  - 抽象实例 `_I.DUMP`（下游实现）：**靠参数拿到 `chunkStash`**，
+    负责转存 ChunkStash 到降级目标并执行 `stash.drop()`，返回
+    PromiseOr。
+  - 公开实例 `async write(chunkStash, buffer)`：先 `await` 该 stash
+    的 dumping 屏障再经抽象 `_I.WRITE` 追加（返回 `undefined`）。
+  - 公开实例 `getDumping(chunkStash)`：查询 per-stash dumping。
+  - **Degraded 自定义资源可自备 WeakMap**（已认可，语义不变）：转存
+    产物经降级策略自备 WeakMap 传递给 reader；例如文件降级在 `DUMP`
+    时自行生成 uuid 或文件名；`id` / 文件名等是降级策略内部细节，
+    非分发器职责。
+  - **`await dumping` 只提供阻塞，不提供产物**（已认可，语义不变）：
+    时序为分发器先触发 `transferrer.dump()`，再并发 `new` reader
+    实例，再并发开始初始化；初始化 `await chunkStashDumping` 自然
+    等待转存完成；若已完成则直接通过。产物传递走降级策略自备的
+    WeakMap，与 dumping 屏障解耦。
+  - 【待定：`_I.DUMP` 返回的 Promise resolve 值（转存产物）的结构；
     实例侧 `_I.INITIALIZE` / `_I.READ` 具体签名】
 - **TemporaryFileChunkReader**（未来）：临时文件目录通过**配置方法 +
   默认实现**提供，属子类职责，非分发器维护。它是
@@ -186,11 +195,12 @@ Promise"这一事实：
 - [x] dump 进行中，拷贝 pull 从 BufferReader 读 → 半截数据
       已解：同 tick 换读器后无拷贝再碰 buffer。
 - [x] 降级读取器在 dump 完成前读取 → 读到不完整/半截数据
-      已解（框架层落定 2026-08-28）：`AbstractDegradedChunkReader`
-      的 `_I.INITIALIZE` await dumping 屏障（`S.DUMPING`），`read()` /
-      `close()` await `I.INITIALIZED`，转存完成前绝不读；所有消费者
-      共享同一 Promise 屏障，dump 失败统一转义并传播给所有（含迟到）
-      消费者。
+      已解（框架层 2026-08-28；2026-09-07 随 Transferrer 更新）：降级
+      reader 的 `_I.INITIALIZE` await 其 stash 的 dumping 屏障
+      （`chunkStashDumping` ← transferrer 的 per-stash dumping），
+      `read()` / `close()` await `I.INITIALIZED`，转存完成前绝不读；
+      所有消费者共享同一 Promise 屏障，dump 失败统一转义并传播给所有
+      （含迟到）消费者。
 - [ ] switching 期间新 `fork()` 的拷贝 → 拿到的 reader 指向何物？
 - [ ] 切换途中某拷贝 `cancel` / `destroy` → 未完成的 reader 怎么办？
 - [x] 慢拷贝落后：skip 位置 = 该拷贝 `consumedChunks`，如何保证
@@ -217,8 +227,9 @@ Promise"这一事实：
 - 构造：分发器传 `{ progress, chunkStash }` 上下文（`id` 已移除，
   属降级策略内部细节）；文件句柄等存储要素由子类自建
   （TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。降级
-  读取器继承 `AbstractDegradedChunkReader`，实现 `_S.DUMP` 及继承的
-  `_I.READ` / `_I.SEEK` / `_I.CLOSE`。
+  读取器继承 `AbstractDegradedChunkReader`（纯读，实现继承的 `_I.*`）；
+  写侧配套一个继承 `AbstractTransferrer` 的子类（`_I.DUMP` / `_I.WRITE`），
+  并经 reader 的一次性静态成员 `transferrer` 配置挂上。
 - `_I.READ` 按 position 游标前进（读 body）；`_I.SEEK` 只读 4B 头并
   前进游标（不读 body），供 `skip()` 定位。
 - `I.CONSUMED` 由 `skip()` 基于 `_I.SEEK` 推进（skip 是定位非新消费）

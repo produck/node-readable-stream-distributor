@@ -319,3 +319,31 @@
   作为演进记录。
 - 对外可观察状态采用 `degraded`（代理 `BUFFER_STASH.dropped`），
   避免臆造词（如 `fallbacked`）与文件特定命名（如 `inFilePhase`）。
+
+## 2026-09-07
+
+### 降级写侧抽离：Transferrer
+
+- `AbstractDegradedChunkReader` 回归**纯读**：移除静态 `_S.DUMP` /
+  `_S.WRITE` / `S.DUMPING` / `dump()` / `write()` / `getDumping()` 及
+  错误转义。实例只读：持 `$I.CHUNK_STASH`，初始化 `_I.INITIALIZE`
+  await 本 stash 的 dumping 屏障（`chunkStashDumping`）。
+- 新增家族内部抽象 **`AbstractTransferrer`**（`DegradedChunkReader/
+Transferrer/`），介质中性：实例方法 `dump(chunkStash)`（整块迁移 +
+  `stash.drop()`）、`async write(chunkStash, buffer)`（先等该 stash 的
+  dump 屏障再续写，`Promise<undefined>`）、`getDumping(chunkStash)`；
+  抽象实例成员 `_I.DUMP` / `_I.WRITE` 由下游实现，per-stash dumping
+  收在 Transferrer 实例内（WeakMap）。
+- **Reader 与 Transferrer 配对**：具体 reader 类经一次性静态成员
+  `transferrer` 配置其配套 `AbstractTransferrer` 实例（守卫式 setter：
+  一次性不可变 + `instanceof AbstractTransferrer`）；未配置的 reader
+  不能 `new`。实例经 `I.CONSTRUCTOR.transferrer` 取屏障。
+- 命名论证：`Store` 暗示必然落存储、`Dumper` 偏一次性动作、`Reader`
+  对实例侧成立但对写侧不成立——选 **Transferrer** 覆盖"整块迁移 +
+  持续续写"且介质中性。跨 realm 顾虑不适用于配置面（Transferrer 是
+  下游同 realm 构造的对象），仅数据面（chunk 跨 realm）由具体实现
+  处理。
+- 文档同步：DESIGN（模块表 / 目录示例 / 分叉架构）、SWITCHING（构造
+  协议 / 竞态清单 / 停靠措辞）、BROWSER（degradation branch 描述）
+  随此更新。写侧批量优化空间结论（原 `_S.DUMP` 时期）在 Transferrer
+  内部延续。

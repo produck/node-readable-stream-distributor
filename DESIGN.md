@@ -111,14 +111,14 @@ graph TD
 
 ### 模块
 
-| 模块                          | 职责                                                                  |
-| ----------------------------- | --------------------------------------------------------------------- |
-| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现    |
-| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，`drop()` 一次性清空并密封               |
-| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                    |
-| `AbstractDegradedChunkReader` | 降级读取器抽象中间层——静态转存（`_S.DUMP` + `S.DUMPING`），不绑定存储 |
-| `TemporaryFileChunkReader`    | （未来）文件阶段——降级抽象层的 Node 文件系统实现                      |
-| chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                                  |
+| 模块                          | 职责                                                                    |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现      |
+| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，`drop()` 一次性清空并密封                 |
+| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                      |
+| `AbstractDegradedChunkReader` | 降级读取器抽象中间层——纯读：写侧由 AbstractTransferrer 承担，不绑定存储 |
+| `TemporaryFileChunkReader`    | （未来）文件阶段——降级抽象层的 Node 文件系统实现                        |
+| chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                                    |
 
 ### 目录安排约定
 
@@ -144,8 +144,12 @@ Distributor/
     Abstract.mjs
     index.mjs
     Symbol.mjs
-  DegradedChunkReader/  # AbstractDegradedChunkReader（子类，与 ChunkReader/ 平行）
-    Abstract.mjs        # 抽象中间层
+  DegradedChunkReader/  # 降级家族：AbstractDegradedChunkReader（纯读抽象，与 ChunkReader/ 平行）
+    Abstract.mjs
+    Transferrer/        # AbstractTransferrer（家族内部抽象：写侧 dump/write）
+      Abstract.mjs
+      index.mjs
+      Symbol.mjs
     index.mjs
     Symbol.mjs
   TemporaryFile/        # （未来）TemporaryFileChunkReader（子类，与 DegradedChunkReader/ 平行）
@@ -226,21 +230,27 @@ graph BT
 
 - `BufferChunkReader` 直接消费共享 `ChunkStash`（按 index 读，`done`
   由 `stash.length` 决定），是内存路径分支。
-- `AbstractDegradedChunkReader` 是降级读取器家族的抽象中间层。转存
-  职责在**静态侧**：
-  - `_S.DUMP(chunkStash)` — 抽象静态，返回 PromiseOr（会被转为
-    Promise），转存 ChunkStash 到降级存储并执行 `stash.drop()`。
-  - `dump(chunkStash)` — 公开静态，调用 `_S.DUMP`，Promisify 并做
-    抽象层异常处理修饰，将生成的 Promise 记录到 `S.DUMPING`（静态
-    WeakMap：`ChunkStash` ↔ 转存 Promise）。
-  - `getChunkStashDumping()` — 实例级成员，从 `S.DUMPING` 查询本实例
-    `ChunkStash` 的转存 Promise；初始化过程 `await` 它（仅阻塞，
-    不提供产物）。
+- `AbstractDegradedChunkReader` 是降级读取器家族的抽象中间层，**纯读**：
+  - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`；初始化
+    （`_I.INITIALIZE`）`await` 该 stash 的 **dumping 屏障**
+    （`chunkStashDumping`，仅阻塞、不提供产物），`read()` / `close()`
+    await 初始化完成——转存完成前绝不读。
+  - **写侧不在此类**：具体 reader 通过一次性静态成员 `transferrer`
+    配置一个 `AbstractTransferrer` 实例；初始化经
+    `I.CONSTRUCTOR.transferrer` 取屏障。
   - 转存产物经降级策略自备的 WeakMap 传递；`id` / 文件名等是降级
     策略内部细节，非分发器职责。
   - **不设 `_I.OPEN`**：抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
-- `TemporaryFileChunkReader` 是 `AbstractDegradedChunkReader` 的 Node
-  文件系统实现；浏览器分支（IndexedDB / OPFS）同挂其下。
+- `AbstractTransferrer` 是降级家族写侧的内部抽象（实例），介质中性：
+  - `dump(chunkStash)` — 把整个 `ChunkStash` 转移到降级目标并执行
+    `stash.drop()`；抽象实例成员 `_I.DUMP` 由下游实现实际转存，
+    抽象层 Promisify + 异常转义并登记 per-stash dumping Promise。
+  - `write(chunkStash, buffer)` — 活数据单块续写；先 `await` 该 stash
+    的 dumping 屏障再追加（返回 `undefined`）。
+  - `getDumping(chunkStash)` — 查询 per-stash dumping Promise。
+- `TemporaryFileChunkReader`（未来）是 `AbstractDegradedChunkReader` 的
+  Node 文件系统读实现，配套其 `TemporaryFileTransferrer` 提供写侧；
+  浏览器分支（IndexedDB / OPFS）同挂其下。
 
 ### 切换流程
 
