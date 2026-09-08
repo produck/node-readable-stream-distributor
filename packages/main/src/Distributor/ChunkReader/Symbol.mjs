@@ -14,11 +14,17 @@ export const I = deepFreeze({
 
 const $I_PROGRESS = Symbol('.$progress');
 const $I_CHUNK_STASH = Symbol('.$chunkStash');
+const $I_CLOSE = Symbol('.$close()');
+const $I_READ = Symbol('.$read()');
+const $I_SKIP = Symbol('.$skip()');
 const $I_START_INITIALIZE = Symbol('.$startInitialize()');
 
 export const $I = deepFreeze({
   PROGRESS: $I_PROGRESS,
   CHUNK_STASH: $I_CHUNK_STASH,
+  CLOSE: $I_CLOSE,
+  READ: $I_READ,
+  SKIP: $I_SKIP,
   START_INITIALIZE: $I_START_INITIALIZE,
 });
 

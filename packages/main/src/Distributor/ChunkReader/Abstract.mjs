@@ -14,6 +14,10 @@ class AbstractChunkReader {
     this[$I.CHUNK_STASH] = chunkStash;
   }
 
+  get chunkStash() {
+    return this[$I.CHUNK_STASH];
+  }
+
   [$I.START_INITIALIZE]() {
     // TODO: START_INITIALIZE MUST be called within the same tick as the
     // constructor. The abstract layer should guard this (e.g. a microtask
@@ -27,7 +31,7 @@ class AbstractChunkReader {
     this[I.INITIALIZED] = this[_I.INITIALIZE]();
   }
 
-  async close() {
+  async [$I.CLOSE]() {
     if (this[I.CLOSED]) {
       return;
     }
@@ -41,7 +45,7 @@ class AbstractChunkReader {
     return this[I.CLOSED];
   }
 
-  async read() {
+  async [$I.READ]() {
     await this[I.INITIALIZED];
 
     const { value, done } = await this[_I.READ]();
@@ -53,7 +57,7 @@ class AbstractChunkReader {
     return { value, done };
   }
 
-  async skip(n = 1) {
+  async [$I.SKIP](n = 1) {
     if (!Number.isInteger(n) || n < 0) {
       ThrowTypeError('n', 'a non-negative integer');
     }

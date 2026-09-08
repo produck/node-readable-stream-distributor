@@ -7,7 +7,7 @@ export class BufferChunkReader extends ChunkReader.Abstract {
 
   async [ChunkReader._I.READ]() {
     const index = this[ChunkReader.$I.PROGRESS] + this[I.CONSUMED];
-    const chunkStash = this[ChunkReader.$I.CHUNK_STASH];
+    const chunkStash = this.chunkStash;
 
     if (index >= chunkStash.length) {
       return { done: true };
@@ -18,8 +18,7 @@ export class BufferChunkReader extends ChunkReader.Abstract {
 
   async [ChunkReader._I.SEEK]() {
     return (
-      this[ChunkReader.$I.PROGRESS] + this[I.CONSUMED] >=
-      this[ChunkReader.$I.CHUNK_STASH].length
+      this[ChunkReader.$I.PROGRESS] + this[I.CONSUMED] >= this.chunkStash.length
     );
   }
 }

@@ -27,16 +27,14 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     }
 
     if (!(transferrer instanceof Transferrer.Abstract)) {
-      ThrowTypeError('transferrer', 'an AbstractTransferrer instance');
+      ThrowTypeError('transferrer', 'a <Concrete>Transferrer instance');
     }
 
     this[S.TRANSFERRER] = transferrer;
   }
 
   get chunkStashDumping() {
-    return this[I.CONSTRUCTOR].transferrer.getDumping(
-      this[ChunkReader.$I.CHUNK_STASH],
-    );
+    return this[I.CONSTRUCTOR].transferrer.getDumping(this.chunkStash);
   }
 
   [ChunkReader._I.INITIALIZE]() {

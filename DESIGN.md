@@ -111,14 +111,14 @@ graph TD
 
 ### 模块
 
-| 模块                          | 职责                                                                    |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现      |
-| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，`drop()` 一次性清空并密封                 |
-| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                      |
-| `AbstractDegradedChunkReader` | 降级读取器抽象中间层——纯读：写侧由 AbstractTransferrer 承担，不绑定存储 |
-| `TemporaryFileChunkReader`    | （未来）文件阶段——降级抽象层的 Node 文件系统实现                        |
-| chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                                    |
+| 模块                          | 职责                                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现           |
+| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/drop），读侧公开 |
+| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                           |
+| `AbstractDegradedChunkReader` | 降级读取器抽象中间层——纯读：写侧由 AbstractTransferrer 承担，不绑定存储      |
+| `TemporaryFileChunkReader`    | （未来）文件阶段——降级抽象层的 Node 文件系统实现                             |
+| chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                                         |
 
 ### 目录安排约定
 
@@ -242,8 +242,8 @@ graph BT
     策略内部细节，非分发器职责。
   - **不设 `_I.OPEN`**：抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
 - `AbstractTransferrer` 是降级家族写侧的内部抽象（实例），介质中性：
-  - `dump(chunkStash)` — 把整个 `ChunkStash` 转移到降级目标并执行
-    `stash.drop()`；抽象实例成员 `_I.DUMP` 由下游实现实际转存，
+  - `dump(chunkStash)` — 把整个 `ChunkStash` 转移到降级目标（不含
+    封存）；抽象实例成员 `_I.DUMP` 由下游实现实际转存，
     抽象层 Promisify + 异常转义并登记 per-stash dumping Promise。
   - `write(chunkStash, buffer)` — 活数据单块续写；先 `await` 该 stash
     的 dumping 屏障再追加（返回 `undefined`）。

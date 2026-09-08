@@ -25,8 +25,8 @@ The `ChunkReader` hierarchy already reflects this split:
 - `AbstractDegradedChunkReader` is the degradation branch's reader and its
   instances only read. The write side lives on a paired internal abstract
   `AbstractTransferrer`: concrete backends implement a `Transferrer`
-  subclass (`_I.DUMP` transfers the whole stash into the degraded target
-  and drops it; `_I.WRITE` appends live chunks) and hang its configured
+  subclass (`_I.DUMP` transfers the whole stash into the degraded target;
+  the distributor seals the stash (drop) after the dump completes; `_I.WRITE` appends live chunks) and hang its configured
   instance on the concrete reader's one-time static `transferrer`. The
   transferrer records a per-stash dumping Promise; reader instances await
   it during init via the `chunkStashDumping` getter, so reads never see a

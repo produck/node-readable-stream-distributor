@@ -121,7 +121,7 @@ Promise"这一事实：
   该降级方案（下游）的责任，`DUMP` 逻辑自理。
 - **构造上下文**：分发器创建 ChunkReader 时提供共享 `chunkStash` 与
   `progress`（该拷贝 `consumedChunks`，skip 位置）。`BufferChunkReader`
-  直接读 `chunkStash`；降级时由配套 transferrer 的 `dump()` 执行 `drop()`。
+  直接读 `chunkStash`；降级时由分发器在 dump 成功后封存（`$I.DROP`）。
   reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
   目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属降级
   策略内部细节。
@@ -143,8 +143,8 @@ Promise"这一事实：
   - 公开实例 `dump(chunkStash)`：调用抽象 `_I.DUMP`，Promisify +
     抽象层异常转义，登记 per-stash dumping Promise。
   - 抽象实例 `_I.DUMP`（下游实现）：**靠参数拿到 `chunkStash`**，
-    负责转存 ChunkStash 到降级目标并执行 `stash.drop()`，返回
-    PromiseOr。
+    负责转存 ChunkStash 到降级目标（不含封存），返回 PromiseOr。
+    封存（drop）由分发器在 dump 成功后执行。
   - 公开实例 `async write(chunkStash, buffer)`：先 `await` 该 stash
     的 dumping 屏障再经抽象 `_I.WRITE` 追加（返回 `undefined`）。
   - 公开实例 `getDumping(chunkStash)`：查询 per-stash dumping。

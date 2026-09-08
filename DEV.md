@@ -347,3 +347,19 @@ Transferrer/`），介质中性：实例方法 `dump(chunkStash)`（整块迁移
   协议 / 竞态清单 / 停靠措辞）、BROWSER（degradation branch 描述）
   随此更新。写侧批量优化空间结论（原 `_S.DUMP` 时期）在 Transferrer
   内部延续。
+
+## 2026-09-08
+
+### ChunkReader 编排分层 + Stash 封存归分发器
+
+- `AbstractChunkReader` 生命周期驱动（read / close / skip）移入内部
+  `$I` 层（包内 fork / 分发器专用，不导出下游）；新增公开只读
+  `get chunkStash()` 供子类读共享 stash。`$I` 与 `_I` 密封分层，同词
+  不冲突（实现者只见 `_I` 钩子）。
+- `ChunkStash.drop()` → 受保护 `[$I.DROP]`：stash 引用经
+  `get chunkStash()` 可达子类后，公开 drop 会泄漏"封存共享内存"的
+  破坏能力。封存权归**分发器**（stash 生命周期 create/push/drop 收口
+  一处），transferrer 只管转存；降级流程 = 分发器触发
+  `transferrer.dump()` → 成功后 `$I.DROP`。
+- `BufferChunkReader` 经公开 `chunkStash` getter 读 stash；仍直读
+  `I.CONSUMED`（纯化候选，未定）。
