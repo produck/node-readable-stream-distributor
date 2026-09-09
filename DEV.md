@@ -1,391 +1,164 @@
-# DEV — Implementation Decision Log
+# DEV — Implementation Notes
 
-## 2026-07-30
+> 组织方式：按**主题/方面**，而非日期。每个主题只记**当前有效结论**；
+> 同一主题后到的决策覆盖先前的（越新越有效），日期仅作追溯标注。
 
-### Architecture style: `@produck/es-abstract`
+## 架构基座
 
-- Adopted `@produck/es-abstract`, following the `Abstract()` + `Member.Method()`
-  convention for declaring abstract members.
-- `ChunkReader` declared as abstract via
-  `Abstract(Class, Abstract({ [I.READ]: M.Method() }))`.
-- `BufferReader` / `FileReader` implement `[IReader.READ]()`.
+### 抽象层：@produck/es-abstract
 
-### Symbol conventions
+- `Abstract(cls, Abstract({...}))` 声明抽象实例成员；`Abstract.Static({...})`
+  声明抽象静态成员；`Member as M` 提供 `M.Method().returns(...)` 契约。
+- 成员约束在**实例属性访问时惰性校验**（缺实现抛 "must be implemented
+  in the subclass"），不阻断 `extends`；静态覆写同样绕过运行时校验，
+  需强约束的下游用 `SubConstructorProxy(Sub)` 包裹。
+- 契约返回类型用 `OrPromiseLike(...)` 表达"或同步或 Promise"：void 钩子
+  标 `OrPromiseLike(Undefined)`；携带值/标志的钩子按其形态（如 `_I.SEEK`
+  标 `OrPromiseLike(Boolean)`；`_I.READ` 返回 `{ value, done }`，契约保持
+  宽松 `OrPromiseLike()`）。
 
-- `I` / `S` — Instance / Static scope.
-- `#` / `$` / `_` — private / protected / abstract (Symbol description prefix).
-- `$I` (`.$*`) — instance-protected: accessible within the design family
-  (e.g. `Distributor.$I.COPIES` is used by both `Abstract.mjs` and
-  `ForkedReadableStream`).
-- Public members use plain string keys, never Symbols.
-- Symbol module exports at most 6 keys: `I`, `$I`, `_I`, `S`, `$S`, `_S`.
-  The module path serves as the namespace.
-- **对外导出限制**：`index.mjs` 只导出受保护/抽象空间
-  （`$I`/`$S`/`_I`/`_S`），**严格不导出私有空间 `I`/`S`**（仅模块
-  内部使用）。
-- Currently used in this project:
-  - `_I.READ` (`._read()`) — ChunkReader abstract instance method
-    (in `Distributor/Symbol.mjs`, to be moved).
-  - `I.*` (`.#*`) — Distributor instance-private state.
-  - `$I.COPIES` (`.$copies`) — Distributor instance-protected, shared with
-    ForkedReadableStream.
+### Symbol 约定
 
-### Static + instance delegation: highWaterMark / tmpdir
+- 层级：`I`/`S` = 实例/静态私有；`$I`/`$S` = 受保护；`_I`/`_S` = 抽象。
+- 方法符号带 `()` 后缀（`.$read()`、`._seek()`）；字段符号不带
+  （`.$consumed`）；描述符：实例 `.#*` / `.$*` / `._*`，静态 `S.*`。
+- `index.mjs` 只导出受保护/抽象空间（`$I`/`$S`/`_I`/`_S`），**严格不导出
+  私有 `I`/`S`**。
+- 单符号模块 ≤6 键；模块路径即命名空间——跨模块同词不冲突（降级
+  `_I.READ` 与基类 `_I.READ` 各自独立）。
+- 面向调用者的具名成员（getter、`chunkStash`）用普通字符串键。
 
-- `highWaterMark` and `tmpdir` are `static` methods. Instance getters
-  delegate through `new.target`.
-- Subclasses override the static method to change behavior; no need to
-  override the instance getter.
-- `new.target` captured in constructor as `this[$.CONSTRUCTOR]`.
-- Per-instance overrides (e.g. via constructor options) are left to
-  subclasses — the base class does not provide this.
+### Static + instance 委托
 
-### Public API
+- 公开静态 getter 委托 `_S` 抽象；实例经构造时捕获的 `I.CONSTRUCTOR`
+  （`new.target`）委托静态侧（不用 `this.constructor`）。
+- `highWaterMark` 默认 `os.freemem()`；`Parser.mjs` 提供 `.returns`
+  解析器（如 `NonNegativeInteger`）。
 
-- `fork({ label })` — register a new consumer copy (was `register`;
-  renamed to `fork` for better streaming semantics).
-- `destroy()` — force-destroy the distributor.
-- `get highWaterMark()` — delegates to `new.target.highWaterMark()`.
-- `get tmpdir()` — delegates to `new.target.tmpdir()`.
+## 观点 / 决策 / 结论
 
-### Module naming
+### 目录约定
 
-- Entry file named `Distributor.mjs` (not `index.mjs`). Package export
-  shape deferred for now.
-- `Symbol.mjs` uses capital `S`, consistent with kitty and other produck
-  projects.
+- 一目录一类：主类文件 `Abstract.mjs`/`Concrete.mjs`（存在性互斥）+
+  `index.mjs` + `Symbol.mjs`；目录路径即命名空间。
+- **子类目录平行于抽象类类目录**（兄弟层级）；向下扩展仅限非继承的
+  内部类（如 `DegradedChunkReader/Transferrer/`）。
+- 叶子极端简化可用单文件特例（如 `Distributor/BufferChunkReader.mjs`）。
 
-## 2026-08-10
+### Distributor（分发器）
 
-### ReadableStreamDistributor becomes a WHATWG EventTarget
+- `extends EventTarget`（WHATWG，不依赖 Node EventEmitter）。
+- 公开面：`fork({ label })` 注册消费拷贝并返回 `ForkedReadableStream`；
+  `get highWaterMark`（委托静态）；`get degraded`（代理
+  `BUFFER_STASH.dropped`）；`destroy()` 为 TODO。
+- 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.BUFFER_STASH`（共享
+  `ChunkStash`）· `$I.REGISTRY`（fork 集，`$I.PRUNE` 清理已取消 fork）。
+  构造校验 source 为未锁定的 WHATWG ReadableStream。
+- 共享 stash 生命周期 create/push/drop **收口在分发器**。
 
-- `ReadableStreamDistributor extends EventTarget` — observable lifecycle via
-  standard `addEventListener` / `dispatchEvent`.
-- `fork` and `destroy` events dispatched on state change. Future events:
-  `drain` (copies to zero), `overflow` (memory→disk), `error`.
-- Keeps the package WHATWG-oriented (no Node EventEmitter dependency);
-  Node users bridge via `stream.toWeb()` if needed.
-- Symbol-keyed members make the `extends` chain collision-safe.
+### ChunkStash（共享内存暂存）
 
-### highWaterMark / tmpdir become static abstract members
+- 公开只读：`dropped` / `length` / `byteLength`；`get(index)` 带封存守卫；
+  `chunks()` 返回有序快照迭代器。
+- 写面受保护：`$I.PUSH(chunk)`、`$I.DROP()`——公开 drop 会泄漏"封存共享
+  内存"的能力，封存权归**分发器**（Transferrer 只管转存，不封存）。
 
-- Declared via `Abstract.Static({ [_S.TMPDIR]: M.Method(), ... })` (note:
-  static abstract members require `Abstract.Static({...})`, not `Abstract({...})`).
-- Base class provides **default implementations** on the `_S` members
-  (`os.freemem()`, `process.env.TMPDIR || os.tmpdir()`) — downstream
-  subclasses may override `[_S.HIGH_WATER_MARK]()` / `[_S.TMPDIR]()` or
-  inherit the defaults.
-- `ReadableStreamDistributor` cannot be constructed directly; it is an
-  abstract constructor.
-- Two-layer delegation:
-  - Public static `static get highWaterMark` / `static get tmpdir` — ergonomic
-    string-keyed getters (no-arg accessors), delegate to the abstract `_S`
-    members via `this`.
-  - Instance getters `get highWaterMark` / `get tmpdir` — delegate to
-    the public static getters via `new.target`
-    (`this[I.CONSTRUCTOR].highWaterMark`).
-- `Parser.mjs` (sibling of `Abstract.mjs`) defines the `returns` parsers:
-  - `NonNegativeInteger` — `highWaterMark` must return `>= 0` integer (bytes).
-  - `AbsolutePath` — `tmpdir` must return an absolute path, implemented via
-    Node `path.isAbsolute()` (package is Node-only for now; no browser plan).
-- `.returns(...)` validates the base default implementations and documents
-  the contract, but **cannot trap subclass overrides** — `extends` is not
-  interceptable by the abstract constructor proxy, so a subclass's own
-  static overrides bypass runtime validation.
-- For full enforcement of subclass overrides, downstream wraps the subclass
-  with `SubConstructorProxy(Sub)` from `@produck/es-abstract`. This is a
-  documented convention (option A): produck users know the tool, and bad
-  return values surface in their unit tests during development.
+### Reader 术语
 
-## 2026-08-11
+- `ChunkReader` = 各拷贝的逐块读取装置；`source reader` = 分发器侧拉取
+  装置。职责不同，代码与文档不共用 `READER`。
 
-### Reader terminology disambiguation
+### ChunkReader 家族
 
-- `READER` was overloaded across two concepts; split into canonical terms
-  (also recorded in DESIGN.md "Chunk 读取器"):
-  - `ChunkReader` — the piece-by-piece chunk-reading device owned by each
-    copy (`ForkedReadableStream.I.CHUNK_READER`, `$I.CHUNK_READER`).
-  - `source reader` — the distributor-side pull device
-    (`Distributor.I.SOURCE_READER`).
-- `ForkedReadableStream.$I.CHUNK_READER` is a **protected** get/set accessor
-  for the copy's chunk reader. It is a symbol (`$I`) because downstream
-  consumers receive the `ForkedReadableStream` instance directly from
-  `fork()`, so a public accessor would expose the internal reader and let
-  consumers interfere with the stream's own pulls. The Distributor swaps
-  readers via `copy[$I.CHUNK_READER] = newReader`. No validation (trusted
-  caller); reader swap is transparent to the copy because both
-  `BufferReader`/`FileReader` implement the same `read()` interface.
+- 分叉：内存路径 `BufferChunkReader`（直接读共享 `ChunkStash`）与降级
+  家族（`AbstractDegradedChunkReader` + 具体叶子）。
 
-### `start` callback cannot access `this`
+#### 基类 AbstractChunkReader = "有位置的读头"
 
-- In `ForkedReadableStream extends ReadableStream`, the `start` callback
-  runs **synchronously inside `super()`**, so `this` is in the temporal dead
-  zone. It must capture the controller via a local variable (`_controller`)
-  bridged to `this[I.CONTROLLER]` after `super()` returns.
-- `pull` / `cancel` are called asynchronously (after construction), so they
-  may use `this` directly.
-- Earlier assumption that `void this` inside `start` was runtime-safe was
-  wrong: lint only checks statically, not TDZ execution.
+- `$I`：`CONSUMED` / `CHUNK_STASH` / `READ`；`_I`：`READ`；公开只读
+  `chunkStash` / `consumedChunks`。
+- `$I.READ` 无就绪屏障：`_I.READ()` → 非 done 则 `CONSUMED++` →
+  `{ value, done }`。
+- 不持初始化/关闭（已迁降级家族）；构造只收 `{ chunkStash }`。
 
-## 2026-08-13
+#### BufferChunkReader（内存 · 即时读）
 
-### ChunkReader lifecycle: close() + initialize()
+- 只实现 `_I.READ`（按 `CONSUMED` 下标读共享 stash，`done` 由
+  `stash.length` 决定）；构造即就绪——分发器无需请求初始化，也无需
+  close（无资源）。
 
-- `ChunkReader` gains a public `close()` (idempotent, base-guarded via
-  `I.CLOSED`), delegating teardown to abstract `_I.CLOSE` (base default
-  no-op for resource-free readers like BufferChunkReader).
-- Initialization uses the abstract layer as the readiness barrier:
-  - `_I.INITIALIZE` — abstract member, returns `PromiseLike<undefined>` or
-    `undefined` (sync init, no barrier). Side effects only.
-  - `I.INITIALIZED` — private member holding the barrier promise (or
-    undefined); `read()`/`close()` unconditionally `await` it.
-  - `$I.START_INITIALIZE` — protected trigger, guarded to run once
-    (`I.INITIALIZATION_STARTED`). Calls `_I.INITIALIZE` and stores the
-    result.
-- **Subclass self-init** (decided): the subclass defines `_I.INITIALIZE` and
-  calls `$I.START_INITIALIZE` once at the end of its own constructor (after
-  stashing params). Not auto-run in the base constructor because subclass
-  fields are unavailable during `super()`.
-- Rationale / justification:
-  - The abstract barrier makes "read waits for readiness" an un-forgettable
-    invariant (vs. per-implementation awaiting inside `_I.READ`).
-  - The `$I.START_INITIALIZE` autonomy (subclass decides WHEN init starts
-    and what to do AFTER init) is forward-looking: the future storage
-    degradation strategy (BROWSER.md) needs backends with differing init
-    timing and post-init work (Node temp files vs IndexedDB/OPFS vs pure
-    memory). This hook is that abstraction's first landing point.
+#### AbstractDegradedChunkReader（降级 · 生命周期持有者）
 
-## 2026-08-16
+- `I`：`CONSTRUCTOR` / `INITIALIZED` / `CLOSED`；`$I`：`REQUEST_INITIALIZE`
+  / `CLOSE`；`_I`：`READ` / `INITIALIZE` / `CLOSE` / `SEEK`；`S`：
+  `TRANSFERRER`（一次性静态配置，未配置不能 `new`）。
+- 初始化经 `I.INITIALIZED`（`_I.INITIALIZE` 返回的 Promise）承接；
+  `_I.INITIALIZE` 默认实现 = dumping 屏障（`chunkStashDumping`）；叶子要
+  open + 定位则覆写它。
 
-### START_INITIALIZE control moves to the Distributor (reversed)
+### 初始化与关闭（归降级家族）
 
-- Reversed the "subclass self-init" decision. The Distributor now calls
-  `$I.START_INITIALIZE`, not the subclass.
-- Reason: subclass self-init let the downstream implementation do extra work
-  AFTER triggering init, which created state uncertainty. The clean contract
-  is: the subclass constructor only arranges context (stashes params) and
-  defines `_I.INITIALIZE`; the Distributor starts the initialization at a
-  fixed, controlled point (same tick as construction).
-- The mechanism is unchanged (`$I.START_INITIALIZE` + once-guard + same-tick
-  TODO); only the caller changes.
-- New contract for subclasses: constructor = context arrangement only. No
-  init trigger, no post-init work.
+- 播种 = **请求初始化** `$I.REQUEST_INITIALIZE(progress)`：同步
+  `CONSUMED = progress` 后发起 `_I.INITIALIZE`（就绪由 `I.INITIALIZED`
+  承接）。曾用构造器传 `progress`、曾名 `START_INITIALIZE` + once-guard
+  （均已废）。
+- **分发器是唯一调用者**（同一 tick：构造 → 请求初始化）；无守卫，
+  初始化完全受分发器控制。
+- `$I.CLOSE`：`I.CLOSED` 幂等 → await `I.INITIALIZED` → `_I.CLOSE`；
+  `get closed` 暴露状态。内存读器不在本契约内（无 close）。
 
-## 2026-08-20
+### 读路径
 
-### ChunkReader 分叉：AbstractFallbackChunkReader 抽象中间层
+- 基类 `$I.READ` 驱动统一承担 CONSUMED 推进（只在基类一处）。
+- 降级读法：**不覆写 `$I.READ`、不走 super**，直接实现
+  `AbstractChunkReader._I.READ`：`await I.INITIALIZED` → 转发自家
+  `_I.READ`。基类驱动对降级实例天然成立；叶子只见降级 `_I` 空间。
 
-- `BufferChunkReader` 直接消费共享 `ChunkStash`（内存路径，按 index 读，
-  `done` 由 `stash.length` 决定）。
-- 新增 `AbstractFallbackChunkReader`（`ChunkReader/Fallback.mjs`）：回退
-  读取器家族的抽象中间层。`_I.INITIALIZE` 模板强制切换公共动作——打开/
-  填充回退存储（子类 `_I.OPEN`）→ 对共享 `ChunkStash` 执行一次 `drop()`。
-  具体存储读写由子类实现 `_I.OPEN` + 继承的 `_I.READ` / `_I.CLOSE`。
-- 构造上下文 `bufferList` 更名 `chunkStash`（语义即共享 `ChunkStash`），
-  `Symbol.mjs` 的 `$I.BUFFER_LIST` 改为 `$I.CHUNK_STASH`，新增 `_I.OPEN`。
-- `TemporaryFileChunkReader`（未来）将作为 `AbstractFallbackChunkReader`
-  的 Node 文件系统实现；浏览器分支（IndexedDB / OPFS）同挂其下——呼应
-  BROWSER.md 的存储降级策略抽象。
+### 切换定位（SEEK 属降级家族）
 
-## 2026-08-26
+- `CONSUMED` = fork 在共享序列的**绝对位置**（受保护）；切换时以各 fork
+  `consumedChunks` 作 `REQUEST_INITIALIZE` 的 progress（播种，非累计）。
+- 基类不含 `$I.SKIP` / `_I.SEEK`：定位是降级叶子 init 的职责，非通用
+  驱动器。
+- 降级 `_I.SEEK`（`._seek()`）：推进一个 chunk 边界、不读 body；叶子在
+  `_I.INITIALIZE`（await dumping 屏障后）按 `CONSUMED` 自实现定位——
+  逐界寻道或存储级 O(1) 跳转；抽象层不控制迭代。
 
-### Fallback 静态转存设计（`AbstractFallbackChunkReader`）
+### Transferrer（降级写侧 · 介质中性）
 
-- 转存职责在静态侧：抽象静态 `_S.DUMP(chunkStash)`（返回 PromiseOr，
-  会被转为 Promise），公开静态 `dump(chunkStash)` 调用它，Promisify 并
-  做抽象层异常处理修饰，把生成的 Promise 记录到静态 WeakMap
-  `S.DUMPING`（`ChunkStash` ↔ 转存 Promise）。
-- 实例级 `getChunkStashDumping()` 从 `S.DUMPING` 查询；实例构造经
-  受保护 `$I.CHUNK_STASH` 持有共享 stash（维持受保护、不新增符号），
-  所有初始化过程 `await dumping`——**仅阻塞、不提供产物**。
-- 转存产物经回退策略自备的 WeakMap 传递；`id`/文件名等是回退策略
-  内部细节（移除分发器 `id`）。
-- 移除 `_I.OPEN`（文件类领域术语；抽象初始化已含 open 概念）。
+- `AbstractDegradedChunkReader` 纯读；写侧抽为家族内部抽象
+  `AbstractTransferrer`：`dump(chunkStash)`（整块迁移，不含封存）、
+  `async write(chunkStash, buffer)`（先等该 stash dumping 屏障再续写）、
+  `getDumping(chunkStash)`；抽象实例 `_I.DUMP` / `_I.WRITE` 由下游实现；
+  per-stash dumping 收在 Transferrer 实例（WeakMap）。
+- **配对**：具体 reader 类静态成员 `transferrer` 一次性配置（守卫：
+  一次性 + `instanceof AbstractTransferrer`）；转存产物（文件名/偏移等）
+  经降级策略自备 WeakMap 传递，属降级策略内部细节。
 
-### 目录安排约定
+### ForkedReadableStream（流面）
 
-- 内部类在对应的目录向下扩展；子类平行于其抽象类建立目录进行实现
-  （抽象类 `Abstract.mjs` 在家族目录根部，每个子类各建平行子目录，
-  内部按 `Concrete.mjs` + `index.mjs` + `Symbol.mjs` 组织）。
+- `extends ReadableStream`；`$I.CHUNK_READER` 受保护 get/set 换读器契约
+  口（分发器替换 reader 用）；`$I.CANCELLED` 供 `$I.PRUNE`。
+- `start` 在 `super()` 内同步执行（TDZ）：用局部变量捕获 controller，
+  `super()` 后桥入 `I.CONTROLLER`；`pull` / `cancel` 异步可安全用 `this`。
 
-### 目录安排约定（取舍：维持统一规则）
+## 术语
 
-- 曾考虑"按需建目录"的判别规则（仅被扩展/有专属符号/独立导出的类
-  建目录，叶子类平级），但特例过多难以遵守，放弃。
-- 维持"一目录一类"的统一规则，接受少量目录浪费：一致性换来机械可
-  执行（无需判断，任何类都进目录），避免规则漂移。
-- 该模式本质类似 C# partial class 的设计目标——一个复杂类是内部
-  相关资源的混合体——但更灵活：无需语言标记，目录即文件系统层的
-  资源聚合（`Concrete.mjs`/`Abstract.mjs` + `Symbol.mjs` + `index.mjs` +
-  子类目录），打开目录即见类的全部。
-- `Concrete` 与 `Abstract` 存在性互斥：一个目录内主类文件只有一个
-  （具体 → `Concrete.mjs`，抽象 → `Abstract.mjs`）。
-- "结构碎"的收益：每文件职责单一（类本体/符号/导出分离），目录路径
-  即命名空间，跨模块符号冲突被物理隔离（呼应 Symbol 模块 ≤6 键约束）。
-- 目录根部可并存共享模块与类聚合（如 `Distributor/` 根部 `Parser.mjs`
-  - `Symbol.mjs` + `index.mjs`，同时 `ChunkStash/`、`ForkedReadableStream/`
-    各聚合类资源）。
+- seek = 寻道（光驱磁头找道，游标跨边界）；seed = 播种（给 `CONSUMED`
+  初值）——不同词，不混用。
+- 内存→磁盘阶段切换称"降级（degraded）"（原 Fallback 术语已弃）。
 
-## 2026-08-27
+## 决策日志（演进 · 按时间追加）
 
-### BufferChunkReader 单文件特例（迁移）
+> 不稳定、演进中的决策先在此按时间（`### YYYY-MM-DD`）追加，保留
+> 来龙去脉；一旦收敛为确定结论，不定期执行"结论压缩"——并入上方
+> 对应主题的"当前有效结论"，并从本节移除。
 
-- 迁移 `BufferChunkReader` 从 `ChunkReader/Buffer.mjs` 到
-  `Distributor/BufferChunkReader.mjs`（单文件，文件名即类名）。
-- 引入目录约定的**唯一特例**：极端简化（无子类、无专属符号、无需
-  独立导出入口）时可用单文件模式，不展开目录。
-- `ChunkReader/index.mjs` 不再导出 `BufferChunkReader`；改由
-  `Distributor/index.mjs` 导出。
+### 2026-09-09 — 定位与生命周期收敛（已压缩入上方，留作示例）
 
-### Fallback 展开目录（迁移）
-
-- 迁移 `AbstractFallbackChunkReader` 从 `ChunkReader/Fallback.mjs` 到
-  `ChunkReader/Fallback/Abstract.mjs`，展开为独立目录。
-- `ChunkReader/Fallback/` 目录：`Abstract.mjs`（抽象中间层）+
-  `index.mjs`（`export { default as Abstract }`）。Fallback 专属符号
-  （如未来 `S.DUMPING` / `_S.DUMP`）实现时再建 `Fallback/Symbol.mjs`。
-- `ChunkReader/index.mjs` 经 `export { Abstract as AbstractFallbackChunkReader }`
-  转发（`Fallback/index.mjs` 导出的是 named `Abstract`，非 default）。
-
-### Fallback 位置修正（平行于抽象类类目录）
-
-- 昨天落笔的目录约定对"平行"理解有偏差：误把子类目录画在抽象类
-  家族目录内部（向下扩展）。
-- 正确规则：**子类**是继承关系，其目录**平行于抽象类的类目录**（同一
-  父目录下的兄弟层级），而非在抽象类目录内向下扩展；**向下扩展仅适用
-  于非继承关系的内部类**。
-- `AbstractFallbackChunkReader` 正确位置为 `Distributor/FallbackChunkReader/`
-  （目录名对应类名：类名去 `Abstract` 前缀；与 `ChunkReader/` =
-  `AbstractChunkReader` 的类目录平行），改由 `Distributor/index.mjs`
-  导出；`ChunkReader/index.mjs` 不再导出它。
-- `BufferChunkReader` 位于 `Distributor/BufferChunkReader.mjs` 即此规则
-  的旁证（子类平行于抽象类类目录）。
-
-## 2026-08-28
-
-### FallbackChunkReader 自有 Symbol 与 dump 机制落地
-
-- 补建 `FallbackChunkReader/Symbol.mjs`（此前迁移时漏建，违反"一目录
-  一类：Abstract/Concrete + index + Symbol"约定）。
-- Fallback 家族自有符号：`S.DUMPING`（静态 WeakMap 键）、`_S.DUMP`
-  （抽象静态转存）。同时修复残留的裸 `_I.OPEN` 引用（未 import 的
-  bug）——`_I.OPEN` 不再使用（设计已移除）。
-- `AbstractFallbackChunkReader` 落地已认可设计：
-  - `static [S.DUMPING] = new WeakMap()`：stash ↔ dumping Promise 注册表。
-  - `static dump(chunkStash)`：调用 `_S.DUMP`，经
-    `Promise.resolve().then(...)` Promisify（同步异常转 rejected），
-    记录到 `S.DUMPING`；失败经 `.catch()` 做**抽象层异常转义**——
-    包装为可辨识的 dumping 错误（`Ow.Error.Common`，原始错误作
-    `cause`）。
-  - 实例 `getChunkStashDumping()`：经 `this.constructor[S.DUMPING]`
-    查询本实例 stash 的转存 Promise。
-  - `_I.INITIALIZE` 返回 `this.getChunkStashDumping()`（await 屏障，
-    仅阻塞、不产产物）。
-- **私有符号空间不对外导出**：`index.mjs` 只导出受保护/抽象空间
-  （`$I`/`$S`/`_I`/`_S`），严格不导出 `I`/`S`。据此移除
-  `ChunkStash/index.mjs` 的 `I` 导出与 `FallbackChunkReader/index.mjs`
-  的 `S` 导出（`S.DUMPING` 仅模块内部使用）。
-- **实例访问自身静态成员不用 `this.constructor`**（不安全），采用
-  `I.CONSTRUCTOR` 符号 + 构造时 `new.target` 捕获（与
-  `Distributor/Abstract.mjs` 一致）。`FallbackChunkReader` 新增
-  `I.CONSTRUCTOR`，`getChunkStashDumping()` 经
-  `this[I.CONSTRUCTOR][S.DUMPING]` 访问静态 WeakMap。
-
-## 2026-09-02
-
-### `_I.SEEK`：skip 与 read 解耦
-
-- 抽象 `_I.SEEK`（`._seek()`）：只移动一个位置、不读取数据，返回
-  done（是否越界）。`skip(n)` 改为逐块 `_I.SEEK` 推进 `I.CONSUMED`，
-  不再复用 `read()` 的完整公共路径（避免返回值构造、body 读取等
-  fan-in 开销）。
-- `BufferChunkReader` 实现 `_I.SEEK`（越界判断 O(1)，不读数据）；
-  文件回退 reader 的 `_I.SEEK` 只读 4B 头 + 前进游标（不读 body），
-  skip 效率优化留在具体实现（线性变长结构 + 偏移索引待定）。
-
-## 2026-09-03
-
-### Fallback → Degraded 术语统一
-
-- 将"回退（Fallback）"语系统一为"降级（Degraded）"：代码与正式
-  设计文档与 BROWSER.md 的 **storage degradation strategy layer**
-  术语对齐（原 Fallback 与 BROWSER.md 的 degradation 不一致）。
-- `FallbackChunkReader/` → `DegradedChunkReader/`（git mv 保留历史）；
-  `AbstractFallbackChunkReader` → `AbstractDegradedChunkReader`；
-  Distributor 导出名同步。操作名 `dump` / `S.DUMPING` / `_S.DUMP`
-  不变。
-- DESIGN.md / SWITCHING.md / BROWSER.md 中的类名、目录名与"回退"
-  概念词改为 Degraded/降级。DEV.md 历史段（08-20 ~ 08-28）保留原词
-  作为演进记录。
-- 对外可观察状态采用 `degraded`（代理 `BUFFER_STASH.dropped`），
-  避免臆造词（如 `fallbacked`）与文件特定命名（如 `inFilePhase`）。
-
-## 2026-09-07
-
-### 降级写侧抽离：Transferrer
-
-- `AbstractDegradedChunkReader` 回归**纯读**：移除静态 `_S.DUMP` /
-  `_S.WRITE` / `S.DUMPING` / `dump()` / `write()` / `getDumping()` 及
-  错误转义。实例只读：持 `$I.CHUNK_STASH`，初始化 `_I.INITIALIZE`
-  await 本 stash 的 dumping 屏障（`chunkStashDumping`）。
-- 新增家族内部抽象 **`AbstractTransferrer`**（`DegradedChunkReader/
-Transferrer/`），介质中性：实例方法 `dump(chunkStash)`（整块迁移 +
-  `stash.drop()`）、`async write(chunkStash, buffer)`（先等该 stash 的
-  dump 屏障再续写，`Promise<undefined>`）、`getDumping(chunkStash)`；
-  抽象实例成员 `_I.DUMP` / `_I.WRITE` 由下游实现，per-stash dumping
-  收在 Transferrer 实例内（WeakMap）。
-- **Reader 与 Transferrer 配对**：具体 reader 类经一次性静态成员
-  `transferrer` 配置其配套 `AbstractTransferrer` 实例（守卫式 setter：
-  一次性不可变 + `instanceof AbstractTransferrer`）；未配置的 reader
-  不能 `new`。实例经 `I.CONSTRUCTOR.transferrer` 取屏障。
-- 命名论证：`Store` 暗示必然落存储、`Dumper` 偏一次性动作、`Reader`
-  对实例侧成立但对写侧不成立——选 **Transferrer** 覆盖"整块迁移 +
-  持续续写"且介质中性。跨 realm 顾虑不适用于配置面（Transferrer 是
-  下游同 realm 构造的对象），仅数据面（chunk 跨 realm）由具体实现
-  处理。
-- 文档同步：DESIGN（模块表 / 目录示例 / 分叉架构）、SWITCHING（构造
-  协议 / 竞态清单 / 停靠措辞）、BROWSER（degradation branch 描述）
-  随此更新。写侧批量优化空间结论（原 `_S.DUMP` 时期）在 Transferrer
-  内部延续。
-
-## 2026-09-08
-
-### ChunkReader 编排分层 + Stash 封存归分发器
-
-- `AbstractChunkReader` 生命周期驱动（read / close / skip）移入内部
-  `$I` 层（包内 fork / 分发器专用，不导出下游）；新增公开只读
-  `get chunkStash()` 供子类读共享 stash。`$I` 与 `_I` 密封分层，同词
-  不冲突（实现者只见 `_I` 钩子）。
-- `ChunkStash.drop()` → 受保护 `[$I.DROP]`：stash 引用经
-  `get chunkStash()` 可达子类后，公开 drop 会泄漏"封存共享内存"的
-  破坏能力。封存权归**分发器**（stash 生命周期 create/push/drop 收口
-  一处），transferrer 只管转存；降级流程 = 分发器触发
-  `transferrer.dump()` → 成功后 `$I.DROP`。
-- `BufferChunkReader` 经公开 `chunkStash` getter 读 stash；仍直读
-  `I.CONSUMED`（纯化候选，未定）。
-
-## 2026-09-09
-
-### ChunkReader 定位模型收敛（CONSUMED 绝对化 + REQUEST_INITIALIZE）
-
-- `$I.PROGRESS` 折叠进 `$I.CONSUMED`：`CONSUMED` 即 fork 在共享序列的
-  绝对位置；`$I.CONSUMED` 由私有 `I` 提升为受保护（内部具体 reader
-  按它定位）。
-- 播种途径移到**请求初始化**：`$I.START_INITIALIZE` 更名
-  `$I.REQUEST_INITIALIZE(progress)`（`.$requestInitialize()`）——语义
-  为"请求初始化"：同步把 `$I.CONSUMED = progress` 后发起
-  `_I.INITIALIZE`（就绪由 `I.INITIALIZED` 承接）。构造器不再收
-  `progress`。
-- 删除 `I.INITIALIZATION_STARTED` 与 once-guard：初始化完全由分发器
-  控制（唯一调用者，同一 tick 构造 + 请求初始化），守卫无意义。
-- 基类剥离 `$I.SKIP` / `_I.SEEK`：切换定位是降级叶子 init 的职责，
-  不是通用下游驱动器；`BufferChunkReader` 不再实现假 `_I.SEEK`。
-- 降级家族预置抽象 `_I.SEEK`（`._seek()`，寻道：推进一个 chunk 边界、
-  不读 body）：叶子在 `_I.INITIALIZE`（await dumping 屏障后）按
-  `$I.CONSUMED`（规定位置）自实现定位，可逐界寻道或存储级 O(1)
-  跳转；抽象层不控制迭代。`DegradedChunkReader/index.mjs` 导出 `_I`。
-- 基类 `_I` 契约收紧：`_I.CLOSE` / `_I.INITIALIZE` → `OrPromiseLike
-(Undefined)`；`_I.READ` 返回 `{ value, done }`，保持宽松
-  `OrPromiseLike()`。
-- 术语：seek = 寻道（光驱时代磁头找道）；seed = 播种（给 `CONSUMED`
-  初值），二者不同词，不再混用。
+- 演进弧：`START_INITIALIZE` + once-guard → 构造器播种 `progress` →
+  `REQUEST_INITIALIZE(progress)` 播种、删 guard → 初始化/关闭迁降级
+  家族、基类收缩为"有位置的读头"。
+- SEEK：基类 `_I.SEEK`（配 `$I.SKIP`）→ 迁降级家族为寻道原语，叶子
+  自实现按位定位；`CONSUMED` 承载 fork 绝对位置。
+- 现结论见上方：ChunkReader 家族 / 初始化与关闭 / 读路径 / 切换定位。

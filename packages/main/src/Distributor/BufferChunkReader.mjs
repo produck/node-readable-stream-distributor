@@ -1,9 +1,6 @@
 import * as ChunkReader from './ChunkReader/index.mjs';
 
 export class BufferChunkReader extends ChunkReader.Abstract {
-  [ChunkReader._I.INITIALIZE]() {}
-  [ChunkReader._I.CLOSE]() {}
-
   async [ChunkReader._I.READ]() {
     const index = this[ChunkReader.$I.CONSUMED];
     const chunkStash = this.chunkStash;

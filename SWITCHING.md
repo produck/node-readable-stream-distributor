@@ -74,8 +74,8 @@ Promise"这一事实：
 
 - 降级 reader 的初始化经 `I.INITIALIZED`（`_I.INITIALIZE` 返回的
   Promise）承接；所有 `read()` / `close()` 都 await 它。
-- skip 到位在 `init` 过程中完成：基类 `$I.REQUEST_INITIALIZE(progress)`
-  先播种 `$I.CONSUMED = progress`，降级叶子按此规定位置自实现定位
+- skip 到位在 `init` 过程中完成：降级 `$I.REQUEST_INITIALIZE(progress)`
+  先播种 `$I.CONSUMED = progress`，叶子按此规定位置自实现定位
   （经家族抽象 `_I.SEEK` 逐界寻道，或存储级 O(1) 跳转）。
 - 切换期间到达的 pull 自然 `await init` 挂着——Promise 就是调度队列，
   无需显式暂停/排队机制，`ForkedReadableStream.pull` 零切换感知。
@@ -83,10 +83,10 @@ Promise"这一事实：
 ### 两个注意细节
 
 - **进度初始化（2026-09-09 定稿）**：skip 是定位不是新消费。播种途径
-  为 `$I.REQUEST_INITIALIZE(progress)`：基类在调 `_I.INITIALIZE` 前把
+  为降级 `$I.REQUEST_INITIALIZE(progress)`：它在调 `_I.INITIALIZE` 前把
   `$I.CONSUMED` 置为 `progress`（= skipN），而非靠 `read()` 累计，否则
   进度记错、后续再切换出错。分发器是唯一调用者；初始化无 once-guard
-  （`I.INITIALIZATION_STARTED` 已删，2026-09-09）。
+  （2026-09-09 迁往降级家族，`I.INITIALIZATION_STARTED` 已删）。
 - **文件句柄生命周期**：所有拷贝共享同一 `init`（同一 fileHandle）。
   `close()` 归最后一个离开的拷贝（done/cancel/destroy 皆算），
   归属要在协议里定清，避免提前关闭或泄漏。
@@ -126,7 +126,7 @@ Promise"这一事实：
 - **构造上下文**：分发器创建 ChunkReader 时提供共享 `chunkStash`
   （2026-09-09：`progress` 不再入构造）。进度作为请求初始化的参数：
   分发器调用受保护 `$I.REQUEST_INITIALIZE(progress)`（`progress` = 该
-  拷贝 `consumedChunks`，即 skip 位置），基类在调 `_I.INITIALIZE` 前
+  拷贝 `consumedChunks`，即 skip 位置），降级在调 `_I.INITIALIZE` 前
   先播种 `$I.CONSUMED = progress`。`BufferChunkReader` 直接读
   `chunkStash`；降级时由分发器在 dump 成功后封存（`$I.DROP`）。
   reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
