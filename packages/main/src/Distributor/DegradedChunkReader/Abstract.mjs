@@ -1,10 +1,10 @@
 import * as Ow from '@produck/ow';
 import { ThrowTypeError } from '@produck/type-error';
-import Abstract from '@produck/es-abstract';
+import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as ChunkReader from '../ChunkReader/index.mjs';
 import * as Transferrer from './Transferrer/index.mjs';
-import { I, S } from './Symbol.mjs';
+import { I, _I, S } from './Symbol.mjs';
 
 class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   constructor(...args) {
@@ -42,4 +42,9 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 }
 
-export default Abstract(AbstractDegradedChunkReader);
+export default Abstract(
+  AbstractDegradedChunkReader,
+  Abstract({
+    [_I.SEEK]: M.Method().returns(M.OrPromiseLike(M.Boolean)),
+  }),
+);

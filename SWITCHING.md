@@ -65,24 +65,28 @@ Promise"这一事实：
 
 ```text
 同 tick（同步）：
-  读各拷贝 consumedChunks → 构造 FileChunkReader(init, skipN)
-    → 换入 $I.CHUNK_READER（全部拷贝）
+  读各拷贝 consumedChunks → 构造降级 reader
+    → $I.REQUEST_INITIALIZE(consumedChunks) → 换入 $I.CHUNK_READER
 之后（异步）：
-  init 链：dump → skip 到位 → 就绪
-  read()：总是 await init → 再读文件
+  init 链：await dumping 屏障 → 叶子按播种位置自定位 → 就绪
+  read()：总是 await init → 再读
 ```
 
-- `FileChunkReader` 构造时保存 `init`（创建 FileHandler + dump 的
-  Promise）；所有 `read()` 都从 `init` then/await 出来。
-- skip 到位在 `init` 过程中完成（按旧 ChunkReader 进度定位）。
+- 降级 reader 的初始化经 `I.INITIALIZED`（`_I.INITIALIZE` 返回的
+  Promise）承接；所有 `read()` / `close()` 都 await 它。
+- skip 到位在 `init` 过程中完成：基类 `$I.REQUEST_INITIALIZE(progress)`
+  先播种 `$I.CONSUMED = progress`，降级叶子按此规定位置自实现定位
+  （经家族抽象 `_I.SEEK` 逐界寻道，或存储级 O(1) 跳转）。
 - 切换期间到达的 pull 自然 `await init` 挂着——Promise 就是调度队列，
   无需显式暂停/排队机制，`ForkedReadableStream.pull` 零切换感知。
 
 ### 两个注意细节
 
-- **进度初始化**：skip 是定位不是新消费。`FileChunkReader` 就绪时须把
-  基类 `I.CONSUMED` 初始化为 `skipN`（而非靠 `read()` 累计），否则进度
-  记错，后续再切换会出错。需基类提供"设置初始进度"途径。
+- **进度初始化（2026-09-09 定稿）**：skip 是定位不是新消费。播种途径
+  为 `$I.REQUEST_INITIALIZE(progress)`：基类在调 `_I.INITIALIZE` 前把
+  `$I.CONSUMED` 置为 `progress`（= skipN），而非靠 `read()` 累计，否则
+  进度记错、后续再切换出错。分发器是唯一调用者；初始化无 once-guard
+  （`I.INITIALIZATION_STARTED` 已删，2026-09-09）。
 - **文件句柄生命周期**：所有拷贝共享同一 `init`（同一 fileHandle）。
   `close()` 归最后一个离开的拷贝（done/cancel/destroy 皆算），
   归属要在协议里定清，避免提前关闭或泄漏。
@@ -119,9 +123,12 @@ Promise"这一事实：
   **已移除**（已认可，2026-08-26）：分发器不承担标识职能。ChunkStash
   作为数据制品层承担数据职责；若某个降级方案需要字符串 `id`，那是
   该降级方案（下游）的责任，`DUMP` 逻辑自理。
-- **构造上下文**：分发器创建 ChunkReader 时提供共享 `chunkStash` 与
-  `progress`（该拷贝 `consumedChunks`，skip 位置）。`BufferChunkReader`
-  直接读 `chunkStash`；降级时由分发器在 dump 成功后封存（`$I.DROP`）。
+- **构造上下文**：分发器创建 ChunkReader 时提供共享 `chunkStash`
+  （2026-09-09：`progress` 不再入构造）。进度作为请求初始化的参数：
+  分发器调用受保护 `$I.REQUEST_INITIALIZE(progress)`（`progress` = 该
+  拷贝 `consumedChunks`，即 skip 位置），基类在调 `_I.INITIALIZE` 前
+  先播种 `$I.CONSUMED = progress`。`BufferChunkReader` 直接读
+  `chunkStash`；降级时由分发器在 dump 成功后封存（`$I.DROP`）。
   reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
   目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属降级
   策略内部细节。
@@ -222,17 +229,20 @@ Promise"这一事实：
 - 背压与切换的交互：切换本身是背压点，还是与既有背压点（dump
   未完成暂停 source.read）合并？
 
-### 4. FileChunkReader 接口
+### 4. 降级读取器接口
 
-- 构造：分发器传 `{ progress, chunkStash }` 上下文（`id` 已移除，
-  属降级策略内部细节）；文件句柄等存储要素由子类自建
-  （TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。降级
-  读取器继承 `AbstractDegradedChunkReader`（纯读，实现继承的 `_I.*`）；
-  写侧配套一个继承 `AbstractTransferrer` 的子类（`_I.DUMP` / `_I.WRITE`），
-  并经 reader 的一次性静态成员 `transferrer` 配置挂上。
-- `_I.READ` 按 position 游标前进（读 body）；`_I.SEEK` 只读 4B 头并
-  前进游标（不读 body），供 `skip()` 定位。
-- `I.CONSUMED` 由 `skip()` 基于 `_I.SEEK` 推进（skip 是定位非新消费）
+- 构造：分发器传 `{ chunkStash }` 上下文（`id` 已移除，属降级策略
+  内部细节；`progress` 不再入构造，2026-09-09）；文件句柄等存储要素
+  由子类自建（TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。
+  降级读取器继承 `AbstractDegradedChunkReader`（纯读，实现继承的
+  `_I.*`）；写侧配套一个继承 `AbstractTransferrer` 的子类（`_I.DUMP` /
+  `_I.WRITE`），并经 reader 的一次性静态成员 `transferrer` 配置挂上。
+- **寻道定位在叶子**（2026-09-09）：`$I.REQUEST_INITIALIZE(progress)`
+  播种 `$I.CONSUMED = progress`（规定位置）；降级叶子的 `_I.INITIALIZE`
+  （await dumping 屏障后）按 `consumedChunks` 自实现定位——经家族
+  抽象 `_I.SEEK`（只读 4B 头并前进游标、不读 body）逐界寻道，或按
+  存储做 O(1) 跳转。基类不含 `_I.SEEK` / `$I.SKIP`（定位非通用驱动器）。
+- `_I.READ` 按 position 游标前进（读 body）。
 - 文件句柄关闭归属：最后一个拷贝离开时 close
 
 ### 5. 错误路径

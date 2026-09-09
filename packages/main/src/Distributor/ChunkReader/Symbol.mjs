@@ -1,41 +1,33 @@
 import { deepFreeze } from '@produck/deep-freeze-enumerable';
 
-const I_CONSUMED = Symbol('.#consumed');
 const I_CLOSED = Symbol('.#closed');
-const I_INITIALIZATION_STARTED = Symbol('.#initializationStarted');
 const I_INITIALIZED = Symbol('.#initialized');
 
 export const I = deepFreeze({
-  CONSUMED: I_CONSUMED,
   CLOSED: I_CLOSED,
-  INITIALIZATION_STARTED: I_INITIALIZATION_STARTED,
   INITIALIZED: I_INITIALIZED,
 });
 
-const $I_PROGRESS = Symbol('.$progress');
+const $I_CONSUMED = Symbol('.$consumed');
 const $I_CHUNK_STASH = Symbol('.$chunkStash');
 const $I_CLOSE = Symbol('.$close()');
 const $I_READ = Symbol('.$read()');
-const $I_SKIP = Symbol('.$skip()');
-const $I_START_INITIALIZE = Symbol('.$startInitialize()');
+const $I_REQUEST_INITIALIZE = Symbol('.$requestInitialize()');
 
 export const $I = deepFreeze({
-  PROGRESS: $I_PROGRESS,
+  CONSUMED: $I_CONSUMED,
   CHUNK_STASH: $I_CHUNK_STASH,
   CLOSE: $I_CLOSE,
   READ: $I_READ,
-  SKIP: $I_SKIP,
-  START_INITIALIZE: $I_START_INITIALIZE,
+  REQUEST_INITIALIZE: $I_REQUEST_INITIALIZE,
 });
 
 const _I_READ = Symbol('._read()');
 const _I_CLOSE = Symbol('._close()');
 const _I_INITIALIZE = Symbol('._initialize()');
-const _I_SEEK = Symbol('._seek()');
 
 export const _I = deepFreeze({
   READ: _I_READ,
   CLOSE: _I_CLOSE,
   INITIALIZE: _I_INITIALIZE,
-  SEEK: _I_SEEK,
 });

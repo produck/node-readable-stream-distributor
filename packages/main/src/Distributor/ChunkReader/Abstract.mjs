@@ -1,16 +1,13 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
-import { ThrowTypeError } from '@produck/type-error';
 
 import { I, $I, _I } from './Symbol.mjs';
 
 class AbstractChunkReader {
-  [I.CONSUMED] = 0;
+  [$I.CONSUMED] = 0;
   [I.CLOSED] = false;
-  [I.INITIALIZATION_STARTED] = false;
   [I.INITIALIZED];
 
-  constructor({ progress = 0, chunkStash }) {
-    this[$I.PROGRESS] = progress;
+  constructor({ chunkStash }) {
     this[$I.CHUNK_STASH] = chunkStash;
   }
 
@@ -18,16 +15,8 @@ class AbstractChunkReader {
     return this[$I.CHUNK_STASH];
   }
 
-  [$I.START_INITIALIZE]() {
-    // TODO: START_INITIALIZE MUST be called within the same tick as the
-    // constructor. The abstract layer should guard this (e.g. a microtask
-    // that revokes an "initializable" flag set during construction, so an
-    // asynchronous call throws).
-    if (this[I.INITIALIZATION_STARTED]) {
-      return;
-    }
-
-    this[I.INITIALIZATION_STARTED] = true;
+  [$I.REQUEST_INITIALIZE](progress) {
+    this[$I.CONSUMED] = progress;
     this[I.INITIALIZED] = this[_I.INITIALIZE]();
   }
 
@@ -51,26 +40,14 @@ class AbstractChunkReader {
     const { value, done } = await this[_I.READ]();
 
     if (!done) {
-      this[I.CONSUMED]++;
+      this[$I.CONSUMED]++;
     }
 
     return { value, done };
   }
 
-  async [$I.SKIP](n = 1) {
-    if (!Number.isInteger(n) || n < 0) {
-      ThrowTypeError('n', 'a non-negative integer');
-    }
-
-    for (let i = 0; i < n; i++) {
-      if (!(await this[_I.SEEK]())) {
-        this[I.CONSUMED]++;
-      }
-    }
-  }
-
   get consumedChunks() {
-    return this[I.CONSUMED];
+    return this[$I.CONSUMED];
   }
 }
 
@@ -78,8 +55,7 @@ export default Abstract(
   AbstractChunkReader,
   Abstract({
     [_I.READ]: M.Method().returns(M.OrPromiseLike()),
-    [_I.CLOSE]: M.Method().returns(M.OrPromiseLike()),
-    [_I.INITIALIZE]: M.Method().returns(M.OrPromiseLike()),
-    [_I.SEEK]: M.Method().returns(M.OrPromiseLike(M.Boolean)),
+    [_I.CLOSE]: M.Method().returns(M.OrPromiseLike(M.Undefined)),
+    [_I.INITIALIZE]: M.Method().returns(M.OrPromiseLike(M.Undefined)),
   }),
 );

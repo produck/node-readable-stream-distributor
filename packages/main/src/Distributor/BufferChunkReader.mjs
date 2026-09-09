@@ -1,4 +1,3 @@
-import { I } from './ChunkReader/Symbol.mjs';
 import * as ChunkReader from './ChunkReader/index.mjs';
 
 export class BufferChunkReader extends ChunkReader.Abstract {
@@ -6,7 +5,7 @@ export class BufferChunkReader extends ChunkReader.Abstract {
   [ChunkReader._I.CLOSE]() {}
 
   async [ChunkReader._I.READ]() {
-    const index = this[ChunkReader.$I.PROGRESS] + this[I.CONSUMED];
+    const index = this[ChunkReader.$I.CONSUMED];
     const chunkStash = this.chunkStash;
 
     if (index >= chunkStash.length) {
@@ -14,11 +13,5 @@ export class BufferChunkReader extends ChunkReader.Abstract {
     }
 
     return { value: chunkStash.get(index), done: false };
-  }
-
-  async [ChunkReader._I.SEEK]() {
-    return (
-      this[ChunkReader.$I.PROGRESS] + this[I.CONSUMED] >= this.chunkStash.length
-    );
   }
 }

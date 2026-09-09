@@ -363,3 +363,29 @@ Transferrer/`），介质中性：实例方法 `dump(chunkStash)`（整块迁移
   `transferrer.dump()` → 成功后 `$I.DROP`。
 - `BufferChunkReader` 经公开 `chunkStash` getter 读 stash；仍直读
   `I.CONSUMED`（纯化候选，未定）。
+
+## 2026-09-09
+
+### ChunkReader 定位模型收敛（CONSUMED 绝对化 + REQUEST_INITIALIZE）
+
+- `$I.PROGRESS` 折叠进 `$I.CONSUMED`：`CONSUMED` 即 fork 在共享序列的
+  绝对位置；`$I.CONSUMED` 由私有 `I` 提升为受保护（内部具体 reader
+  按它定位）。
+- 播种途径移到**请求初始化**：`$I.START_INITIALIZE` 更名
+  `$I.REQUEST_INITIALIZE(progress)`（`.$requestInitialize()`）——语义
+  为"请求初始化"：同步把 `$I.CONSUMED = progress` 后发起
+  `_I.INITIALIZE`（就绪由 `I.INITIALIZED` 承接）。构造器不再收
+  `progress`。
+- 删除 `I.INITIALIZATION_STARTED` 与 once-guard：初始化完全由分发器
+  控制（唯一调用者，同一 tick 构造 + 请求初始化），守卫无意义。
+- 基类剥离 `$I.SKIP` / `_I.SEEK`：切换定位是降级叶子 init 的职责，
+  不是通用下游驱动器；`BufferChunkReader` 不再实现假 `_I.SEEK`。
+- 降级家族预置抽象 `_I.SEEK`（`._seek()`，寻道：推进一个 chunk 边界、
+  不读 body）：叶子在 `_I.INITIALIZE`（await dumping 屏障后）按
+  `$I.CONSUMED`（规定位置）自实现定位，可逐界寻道或存储级 O(1)
+  跳转；抽象层不控制迭代。`DegradedChunkReader/index.mjs` 导出 `_I`。
+- 基类 `_I` 契约收紧：`_I.CLOSE` / `_I.INITIALIZE` → `OrPromiseLike
+(Undefined)`；`_I.READ` 返回 `{ value, done }`，保持宽松
+  `OrPromiseLike()`。
+- 术语：seek = 寻道（光驱时代磁头找道）；seed = 播种（给 `CONSUMED`
+  初值），二者不同词，不再混用。
