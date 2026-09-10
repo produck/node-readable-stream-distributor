@@ -22,15 +22,17 @@ export default class SourceReader {
   }
 
   async read() {
-    // TODO: lazily acquire the source reader once, then single-flight on
-    // I.PULLING; done already → { done: true }, captured error → rethrow,
-    // else reader.read() and latch I.DONE / I.ERROR.
+    // TODO: shared by every fork — lazily acquire the source reader once, then
+    //   single-flight on `I.PULLING`; `done` already → `{ done: true }`,
+    //   captured error → rethrow, else `reader.read()` and latch `I.DONE` /
+    //   `I.ERROR`. The awaited settle is the backpressure gate, and a
+    //   rejection must stay distinguishable so `_I.READ` can forward it.
     Ow.Error.Common('Not implemented');
   }
 
   cancel() {
     // TODO: idempotent release of the source reader (cancel vs releaseLock
-    // chosen by the distributor call site).
+    //   chosen by the distributor call site).
     Ow.Error.Common('Not implemented');
   }
 }

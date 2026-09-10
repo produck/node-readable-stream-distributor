@@ -12,10 +12,12 @@ export const I = deepFreeze({
   ASSERT_NOT_DROPPED: I_ASSERT_NOT_DROPPED,
 });
 
+const $I_DONE = Symbol('.$done');
 const $I_DROP = Symbol('.$drop()');
 const $I_PUSH = Symbol('.$push()');
 
 export const $I = deepFreeze({
+  DONE: $I_DONE,
   DROP: $I_DROP,
   PUSH: $I_PUSH,
 });

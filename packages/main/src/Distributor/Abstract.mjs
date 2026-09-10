@@ -4,6 +4,7 @@ import * as Ow from '@produck/ow';
 import { ThrowTypeError } from '@produck/type-error';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
+import { BufferChunkReader } from './BufferChunkReader.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 import * as ChunkStash from './ChunkStash/index.mjs';
 import * as SourceReader from './SourceReader/index.mjs';
@@ -47,8 +48,8 @@ class ReadableStreamDistributor extends EventTarget {
     return this[I.BUFFER_STASH].dropped;
   }
 
-  fork(label = undefined) {
-    if (label !== undefined && typeof label !== 'string') {
+  fork(label = '<UNDEFINED>') {
+    if (typeof label !== 'string') {
       ThrowTypeError('label', 'a string');
     }
 
@@ -56,7 +57,13 @@ class ReadableStreamDistributor extends EventTarget {
       Ow.Error.Common('Distributor has been destroyed');
     }
 
-    const forked = new ForkedReadableStream.Concrete(this, label);
+    const bufferChunkReader = new BufferChunkReader(this[I.BUFFER_STASH]);
+
+    const forked = new ForkedReadableStream.Concrete(
+      this,
+      bufferChunkReader,
+      label,
+    );
 
     this[$I.REGISTRY].add(forked);
     this.dispatchEvent(new Event('fork'));
@@ -64,6 +71,8 @@ class ReadableStreamDistributor extends EventTarget {
     return forked;
   }
 
+  // TODO: nothing calls this yet — the trigger (cancel notification vs fork /
+  //   destroy) is TBD.
   [$I.PRUNE]() {
     for (const forked of this[$I.REGISTRY]) {
       if (forked[ForkedReadableStream.$I.CANCELLED]) {
@@ -76,7 +85,8 @@ class ReadableStreamDistributor extends EventTarget {
     this[I.DESTROYED] = true;
     this.dispatchEvent(new Event('destroy'));
 
-    // TODO: stop pulling, error copies after drain, release source reader
+    // TODO: stop pulling, error live forks after drain (via their controllers)
+    //   and prune the registry, release the source reader
     Ow.Error.Common('Not implemented');
   }
 }

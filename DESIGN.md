@@ -15,7 +15,7 @@
 
 ```text
 主入口流（唯一真实来源）
-  → fork(label?) → ForkedReadableStream
+  → fork(label = '<UNDEFINED>') → ForkedReadableStream
   → 每个拷贝流独立消费
   → 任一拷贝 cancel 不影响其他
   → 拷贝消费完毕（done）或 cancel 均自动清理引用
@@ -48,7 +48,8 @@ const distributor = new MyDistributor(source);
 // 注意：一旦溢出到磁盘后，highWaterMark 不再被查询（单向门）
 
 const copy = distributor.fork('sha1-checker');
-// label：助记符，用于事件和统计中标识拷贝，不作唯一性约束（可选）
+// label：助记符，用于事件和统计中标识拷贝，不作唯一性约束
+// 省略时默认 '<UNDEFINED>'
 // → ForkedReadableStream（ReadableStream 子类）；无 unregister
 
 // 正常消费

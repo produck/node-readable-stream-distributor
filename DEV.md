@@ -48,10 +48,10 @@
 ### Distributor（分发器）
 
 - `extends EventTarget`（WHATWG，不依赖 Node EventEmitter）。
-- 公开面：`fork(label?)` 注册消费拷贝并返回 `ForkedReadableStream`（`label`
-  可选、默认 `undefined`；提供时须为 string）；`get highWaterMark`（委托
-  静态）；`get degraded`（代理 `BUFFER_STASH.dropped`）；`destroy()` 为
-  TODO。
+- 公开面：`fork(label = '<UNDEFINED>')` 注册消费拷贝并返回
+  `ForkedReadableStream`（`label` 助记符，默认占位串 `'<UNDEFINED>'`，
+  须为 string）；`get highWaterMark`（委托静态）；`get degraded`（代理
+  `BUFFER_STASH.dropped`）；`destroy()` 为 TODO。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.BUFFER_STASH`（共享
   `ChunkStash`）· `$I.REGISTRY`（fork 集，`$I.PRUNE` 清理已取消 fork）。
   构造校验 source 为未锁定的 WHATWG ReadableStream。
@@ -163,3 +163,19 @@
 - SEEK：基类 `_I.SEEK`（配 `$I.SKIP`）→ 迁降级家族为寻道原语，叶子
   自实现按位定位；`CONSUMED` 承载 fork 绝对位置。
 - 现结论见上方：ChunkReader 家族 / 初始化与关闭 / 读路径 / 切换定位。
+
+### 2026-09-10 — `$I.READ` 是"前沿消费"接触点；`done` 归 `_I.READ`
+
+- `$I.READ`（每拷贝驱动）是**"前沿消费"的接触点**：消费推进到这里；
+  它也是"要不要再进一步（撞介质前沿 / 催共享取块层）"的判定位置。
+- **`done` 由 `_I.READ` 定义**：只有叶子知道介质是否真的读完。例如
+  "基于文件的降级读取器"，大概靠**文件末尾的特殊标志**判定，从而告知
+  对应分发流确实消费完了。
+- **"是否触达前沿"是另一套信号**：触达前沿（当前可用数据已消费到头、
+  后面可能还有）≠ 结束（真 `done`）。两者必须分开表达——不得拿
+  "暂时没货"当 `done`。
+- **内存路径的"末尾标志"落定**：`ChunkStash` 增加**保护级 `$I.DONE`**
+  （包内信号，非公开）：源结束时由管理层置位；内存读器据它把"触达前沿"
+  与"真 `done`"分开（`index >= length` 且 stash 已 `DONE` 才算完）。
+- 待收敛：前沿信号的具体形态（谁上报、`$I.READ` 如何等待），以及它与
+  共享取块层"确保可用"的衔接。
