@@ -48,9 +48,10 @@
 ### Distributor（分发器）
 
 - `extends EventTarget`（WHATWG，不依赖 Node EventEmitter）。
-- 公开面：`fork({ label })` 注册消费拷贝并返回 `ForkedReadableStream`；
-  `get highWaterMark`（委托静态）；`get degraded`（代理
-  `BUFFER_STASH.dropped`）；`destroy()` 为 TODO。
+- 公开面：`fork(label?)` 注册消费拷贝并返回 `ForkedReadableStream`（`label`
+  可选、默认 `undefined`；提供时须为 string）；`get highWaterMark`（委托
+  静态）；`get degraded`（代理 `BUFFER_STASH.dropped`）；`destroy()` 为
+  TODO。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.BUFFER_STASH`（共享
   `ChunkStash`）· `$I.REGISTRY`（fork 集，`$I.PRUNE` 清理已取消 fork）。
   构造校验 source 为未锁定的 WHATWG ReadableStream。

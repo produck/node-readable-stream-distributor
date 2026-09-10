@@ -47,20 +47,16 @@ class ReadableStreamDistributor extends EventTarget {
     return this[I.BUFFER_STASH].dropped;
   }
 
-  fork(options) {
-    if (typeof options !== 'object' || options === null) {
-      ThrowTypeError('options', 'an object');
-    }
-
-    if (typeof options.label !== 'string') {
-      ThrowTypeError('options.label', 'a string');
+  fork(label = undefined) {
+    if (label !== undefined && typeof label !== 'string') {
+      ThrowTypeError('label', 'a string');
     }
 
     if (this[I.DESTROYED]) {
       Ow.Error.Common('Distributor has been destroyed');
     }
 
-    const forked = new ForkedReadableStream.Concrete(this, options.label);
+    const forked = new ForkedReadableStream.Concrete(this, label);
 
     this[$I.REGISTRY].add(forked);
     this.dispatchEvent(new Event('fork'));

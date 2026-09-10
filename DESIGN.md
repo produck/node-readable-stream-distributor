@@ -15,60 +15,51 @@
 
 ```text
 主入口流（唯一真实来源）
-  → register({ label }) → { stream, unregister() }
+  → fork(label?) → ForkedReadableStream
   → 每个拷贝流独立消费
   → 任一拷贝 cancel 不影响其他
   → 拷贝消费完毕（done）或 cancel 均自动清理引用
-  → unregister() 仅用于主动提前终止
+  → 主动提前终止即 cancel 自己的拷贝流（无 unregister）
   → 当且仅当所有拷贝都离开
   → 主入口流 reader.cancel() / releaseLock()
 ```
 
 ## API
 
-`ReadableStreamDistributor` 提供默认实现，下游按需覆盖。
+`ReadableStreamDistributor` 是**抽象类**——不能直接 `new`，下游须继承；
+默认实现可按需覆盖。
 
-- `get highWaterMark()` → `os.freemem()`
-- `get tmpdir()` → `os.tmpdir()`（实时读环境变量 `TMPDIR`，
-  运维可在线调整，无需重启进程）
+- `get highWaterMark` → 委托静态 `[_S.HIGH_WATER_MARK]()`，默认
+  `os.freemem()`
+- `get degraded` → 代理 `BUFFER_STASH.dropped`
 
-构造条件：`source` 必须未被锁定（`source.locked === false`），
-否则拒绝构造。
+（临时文件目录等存储要素不属分发器职责，由降级策略/子类自管。）
+
+构造条件：`source` 必须为未被锁定的 WHATWG `ReadableStream`
+（`source.locked === false`），否则拒绝构造。
 
 ```js
 import { ReadableStreamDistributor } from '@produck/readable-stream-distributor';
 
-// 零覆盖：全部默认即可用
-const distributor = new ReadableStreamDistributor(source);
-
-// 或按需覆盖
-class MyDistributor extends ReadableStreamDistributor {
-  get highWaterMark() {
-    return this.config.maxBufferSize ?? super.highWaterMark;
-  }
-  get tmpdir() {
-    return this.config.tmpdir ?? super.tmpdir;
-  }
-}
+// 抽象类：须继承后实例化
+class MyDistributor extends ReadableStreamDistributor {}
 const distributor = new MyDistributor(source);
 
 // 注意：一旦溢出到磁盘后，highWaterMark 不再被查询（单向门）
 
-const copy = distributor.register({ label: 'sha1-checker' });
-// label：助记符，用于事件和统计中标识拷贝，不作唯一性约束
-// → { stream: ReadableStream, unregister(): void }
+const copy = distributor.fork('sha1-checker');
+// label：助记符，用于事件和统计中标识拷贝，不作唯一性约束（可选）
+// → ForkedReadableStream（ReadableStream 子类）；无 unregister
 
 // 正常消费
-const reader = copy.stream.getReader();
+const reader = copy.getReader();
 while (true) {
   const { value, done } = await reader.read();
   if (done) break;
 }
 
-// 提前终止——不影响其他拷贝（正常消费完毕无需手动调用）
-copy.unregister();
-
-// 消费者 cancel 自己的 stream 也会自动清理引用
+// 提前终止——cancel 自己的拷贝流，不影响其他
+// （正常消费完毕会自动清理，无需手动调用）
 reader.cancel();
 
 // 强制销毁（框架层策略执行：body 超限、请求超时、客户端断开等）
@@ -104,21 +95,23 @@ graph TD
     COPY_N --> CONSUMER_N["消费者 N"]
 
     BUFFER -- "满且 dump 未完成 →<br/>暂停 source.read()" --> SOURCE
-    COPY_A -- "unregister" --> COUNTER{"活跃计数 -1"}
-    COPY_B -- "unregister" --> COUNTER
+    COPY_A -- "离开（done / cancel）" --> COUNTER{"活跃计数 -1"}
+    COPY_B -- "离开（done / cancel）" --> COUNTER
     COUNTER -- "归零 → reader.cancel()" --> SOURCE
 ```
 
 ### 模块
 
-| 模块                          | 职责                                                                         |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现           |
-| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/drop），读侧公开 |
-| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                           |
-| `AbstractDegradedChunkReader` | 降级读取器抽象中间层——纯读：写侧由 AbstractTransferrer 承担，不绑定存储      |
-| `TemporaryFileChunkReader`    | （未来）文件阶段——降级抽象层的 Node 文件系统实现                             |
-| chunk 文件格式                | `[4B len][chunk data]...` 自描述序列                                         |
+| 模块                                                           | 职责                                                                         |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `ReadableStreamDistributor`                                    | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现           |
+| `ChunkStash`                                                   | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/drop），读侧公开 |
+| `BufferChunkReader`                                            | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                           |
+| `AbstractDegr离开（done / cancel）" --> COUNTER{"活跃计数 -1"} |
+
+    COPY_B -- "离开（done / cancel）er`    | （未来）文件阶段——降级抽象层的 Node 文件系统实现                             |
+
+| chunk 文件格式 | `[4B len][chunk data]...` 自描述序列 |
 
 ### 目录安排约定
 
@@ -307,8 +300,8 @@ sequenceDiagram
     participant A as 拷贝 A (SHA1)
     participant B as 拷贝 B (格式检测)
 
-    DIST->>A: register → { stream, unregister() }
-    DIST->>B: register → { stream, unregister() }
+    DIST->>A: fork → ForkedReadableStream
+    DIST->>B: fork → ForkedReadableStream
     Note over DIST: 活跃拷贝数 = 2
 
     SRC->>DIST: chunk 1
@@ -316,7 +309,7 @@ sequenceDiagram
     DIST->>B: enqueue(chunk 1)
 
     B->>B: 读 chunk 1 → 判断格式
-    B->>DIST: cancel → unregister()
+    B->>DIST: cancel → 自动清理引用
     Note over DIST: 活跃拷贝数 = 1
 
     B-->>B: ✅ 职责结束
@@ -327,7 +320,7 @@ sequenceDiagram
     end
 
     A->>A: SHA1 计算完毕
-    A->>DIST: unregister()
+    A->>DIST: 消费完毕（done）→ 自动清理
     Note over DIST: 活跃拷贝数 = 0 →<br/>source.reader.cancel()
     DIST-->>SRC: releaseLock()
 
@@ -337,8 +330,8 @@ sequenceDiagram
 | 事件                      | 活跃拷贝数                     |
 | ------------------------- | ------------------------------ |
 | 分发器启动，注册拷贝 A、B | 2                              |
-| B cancel → unregister     | **1**                          |
-| A 消费完毕 → unregister   | **0 → source.reader.cancel()** |
+| B cancel → 自动清理       | **1**                          |
+| A 消费完毕 → 自动清理     | **0 → source.reader.cancel()** |
 
 任一拷贝 cancel 不影响其他。最后一个拷贝离开时源头
 才被释放。这就是"全停则全停"。
@@ -397,7 +390,7 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
   下游可据此区分意外终止与策略截断
 
 这保证每个拷贝拿到的始终是连续完整前缀（不会跳号、不会缺中间块），
-且"来晚了"的拷贝也能利用已缓冲数据完成部分工作。新 `register()`
+且"来晚了"的拷贝也能利用已缓冲数据完成部分工作。新 `fork()`
 亦然。
 
 对拷贝流而言，三种终止都是"流结束了"——下游不关心原因时统一处理，
@@ -416,8 +409,8 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
   回报状态
 - **磁盘空间累积**：并发请求 × 慢拷贝消费时长 × 数据量 = 峰值磁盘
   占用
-- **未 unregister 导致泄漏**：消费者既没 cancel 也没调 unregister
-  且持有引用不释放时，文件描述符无法回收、磁盘文件无法删除
+- **未释放导致泄漏**：消费者既没 cancel 自己的拷贝流、也不释放引用时，
+  文件描述符无法回收、磁盘文件无法删除
 
 模块通过事件机制提供感知能力：当拷贝存活时间或落后程度超过阈值
 时触发 `warn` 事件。默认策略为 `console.warn`，调用方可替换为
