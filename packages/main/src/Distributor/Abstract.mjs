@@ -8,6 +8,7 @@ import { BufferChunkReader } from './BufferChunkReader.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 import * as ChunkStash from './ChunkStash/index.mjs';
 import * as SourceReader from './SourceReader/index.mjs';
+import Puller from './Puller.mjs';
 import { isReadableStreamLike } from './Checker.mjs';
 import { I, $I, _S } from './Symbol.mjs';
 import { NonNegativeInteger } from './Parser.mjs';
@@ -38,6 +39,7 @@ class ReadableStreamDistributor extends EventTarget {
 
     this[I.CONSTRUCTOR] = new.target;
     this[I.SOURCE_READER] = new SourceReader.Concrete(source);
+    this[I.PULLER] = new Puller(this);
   }
 
   get highWaterMark() {
@@ -57,7 +59,10 @@ class ReadableStreamDistributor extends EventTarget {
       Ow.Error.Common('Distributor has been destroyed');
     }
 
-    const bufferChunkReader = new BufferChunkReader(this[I.BUFFER_STASH]);
+    const bufferChunkReader = new BufferChunkReader(
+      this[I.PULLER],
+      this[I.BUFFER_STASH],
+    );
 
     const forked = new ForkedReadableStream.Concrete(
       this,
@@ -79,6 +84,12 @@ class ReadableStreamDistributor extends EventTarget {
         this[$I.REGISTRY].delete(forked);
       }
     }
+  }
+
+  // TODO: dump the buffer into the switched medium, then swap every fork's
+  //   reader, each positioned by its own `consumedChunks`.
+  [$I.DEGRADE]() {
+    Ow.Error.Common('Not implemented');
   }
 
   destroy() {

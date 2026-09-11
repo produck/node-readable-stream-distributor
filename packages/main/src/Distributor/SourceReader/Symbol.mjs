@@ -5,6 +5,7 @@ const I_READER = Symbol('.#reader');
 const I_PULLING = Symbol('.#pulling');
 const I_DONE = Symbol('.#done');
 const I_ERROR = Symbol('.#error');
+const I_CONSUMED = Symbol('.#consumed');
 
 export const I = deepFreeze({
   STREAM: I_STREAM,
@@ -12,4 +13,5 @@ export const I = deepFreeze({
   PULLING: I_PULLING,
   DONE: I_DONE,
   ERROR: I_ERROR,
+  CONSUMED: I_CONSUMED,
 });

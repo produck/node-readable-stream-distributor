@@ -199,7 +199,7 @@ Promise"这一事实：
 
 ### 2. 竞态清单
 
-- [x] dump 进行中，拷贝 pull 从 BufferReader 读 → 半截数据
+- [x] dump 进行中，拷贝 pull 从 BufferChunkReader 读 → 半截数据
       已解：同 tick 换读器后无拷贝再碰 buffer。
 - [x] 降级读取器在 dump 完成前读取 → 读到不完整/半截数据
       已解（框架层 2026-08-28；2026-09-07 随 Transferrer 更新）：降级

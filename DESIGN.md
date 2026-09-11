@@ -103,16 +103,111 @@ graph TD
 
 ### 模块
 
-| 模块                                                           | 职责                                                                         |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `ReadableStreamDistributor`                                    | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现           |
-| `ChunkStash`                                                   | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/drop），读侧公开 |
-| `BufferChunkReader`                                            | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                           |
-| `AbstractDegr离开（done / cancel）" --> COUNTER{"活跃计数 -1"} |
+| 模块                          | 职责                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现                                 |
+| `AbstractChunkReader`         | 拷贝侧读取抽象——持有共享 `chunkStash`；进度（`consumedChunks`）与前沿驱动（`$I.READ` → `_I.READ`） |
+| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                 |
+| `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧经静态 `transferrer` 外置                            |
+| `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的 `dump` / `write`                                                  |
+| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/drop），读侧公开                       |
+| `ForkedReadableStream`        | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                             |
+| `SourceReader`                | 分发器侧拉取装置——单流 source reader 的 single-flight 包装（骨架）                                 |
 
-    COPY_B -- "离开（done / cancel）er`    | （未来）文件阶段——降级抽象层的 Node 文件系统实现                             |
+### 类图
 
-| chunk 文件格式 | `[4B len][chunk data]...` 自描述序列 |
+当前状态下所有 `class` 声明的结构与关系。`<<abstract>>` 表示该类经
+`@produck/es-abstract` 的 `Abstract()` 包装（抽象契约 + 子类校验）；
+`TemporaryFileChunkReader` 尚未实现。
+
+```mermaid
+classDiagram
+    direction TB
+
+    class EventTarget
+    class ReadableStream
+
+    class ReadableStreamDistributor {
+        <<abstract>>
+        +highWaterMark
+        +degraded
+        +fork(label)
+        +destroy()
+    }
+
+    class ChunkStash {
+        +length
+        +byteLength
+        +dropped
+        +get(index)
+        +chunks()
+    }
+
+    class SourceReader {
+        +done
+        +error
+        +read()
+        +cancel()
+    }
+
+    class ForkedReadableStream {
+        +distributor
+    }
+
+    class AbstractChunkReader {
+        <<abstract>>
+        +chunkStash
+        +consumedChunks
+    }
+
+    class BufferChunkReader
+
+    class AbstractDegradedChunkReader {
+        <<abstract>>
+        +closed
+        +chunkStashDumping
+    }
+
+    class AbstractTransferrer {
+        <<abstract>>
+        +dump(chunkStash)
+        +write(chunkStash, buffer)
+        +getDumping(chunkStash)
+    }
+
+    class TemporaryFileChunkReader {
+        <<planned>>
+    }
+
+    EventTarget <|-- ReadableStreamDistributor
+    ReadableStream <|-- ForkedReadableStream
+    AbstractChunkReader <|-- BufferChunkReader
+    AbstractChunkReader <|-- AbstractDegradedChunkReader
+    AbstractDegradedChunkReader <|-- TemporaryFileChunkReader
+
+    ReadableStreamDistributor *-- ChunkStash : BUFFER_STASH
+    ReadableStreamDistributor *-- SourceReader : SOURCE_READER
+    ReadableStreamDistributor "1" o-- "0..*" ForkedReadableStream : REGISTRY
+    ForkedReadableStream "1" --> "1" AbstractChunkReader : CHUNK_READER
+    AbstractChunkReader ..> ChunkStash : 共享 chunkStash
+    AbstractDegradedChunkReader ..> AbstractTransferrer : 静态 transferrer
+    TemporaryFileChunkReader ..> AbstractTransferrer : 配套写侧
+    SourceReader ..> ReadableStream : 包住 source reader
+```
+
+图注：
+
+- `ReadableStreamDistributor` 与 `ForkedReadableStream` 分别以
+  `EventTarget` / `ReadableStream` 为基类，继承自平台而非本模块。
+- `ForkedReadableStream` 与 `AbstractChunkReader` 是 1:1——每个拷贝
+  持有自己的读取器，进度（`consumedChunks`）天然 per-fork。
+- `ChunkStash` 由分发器持有并注入每个 `AbstractChunkReader`（`chunkStash`），
+  因此所有拷贝读取器共享同一份；`BufferChunkReader` 经继承的
+  `chunkStash` 按 index 读取。它是当前唯一的 chunk 载体。
+- `SourceReader` 与拷贝流无直接连线：拷贝只读自己的 ChunkReader，
+  不接触 source（见「背压」）。
+- `AbstractDegradedChunkReader` 的写侧不在继承链上，而以静态
+  `transferrer` 外置到 `AbstractTransferrer`。
 
 ### 目录安排约定
 
@@ -206,6 +301,30 @@ interface ChunkReader {
   read(): Promise<{ value: Uint8Array, done: boolean }>;
 }
 ```
+
+### 消费前沿与 done
+
+`read()` 返回的 `{ value, done }` 里，两个信号必须分开表达：
+
+- **`done` 归叶子（`_I.READ`）**：只有叶子知道介质是否真的读完——
+  内存路径看 `ChunkStash.$I.DONE`，未来文件路径大概看文件末尾的特殊
+  标志。
+- **"触达前沿"是另一套信号**：可用数据已消费到头、后面可能还有货，
+  这与"结束"是两回事。不得拿"暂时没货"当 `done`。
+
+驱动作用域固定在基类的受保护 `$I.READ`（每拷贝的驱动入口，包内唯一
+调用者是 `ForkedReadableStream.pull`）：
+
+- **推进**：只有它推进消费位置（非 `done` 才 `CONSUMED++`），因此
+  `CONSUMED` 的前进点全包只有一处。
+- **判定**：也只有它知道"要不要再进一步"——撞上介质前沿时催共享取块
+  层并 `await`（这个 `await` 就是背压闸），而不是返回假 `done`。
+- 降级家族**不覆写** `$I.READ`、也不走 `super`，只在 `_I.READ` 里
+  `await` 初始化后转发自家 `_I.READ`；基类推进对它们天然成立。
+
+前沿等待的**信号形态尚未定**（谁上报、"到货 / 封口"如何表达、与共享
+取块层"确保可用"如何衔接），实现时再定；但"等待必须由 Promise / 事件
+驱动、不得循环重查"已经确定。
 
 ### 分叉架构
 

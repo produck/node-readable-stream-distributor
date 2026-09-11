@@ -8,6 +8,7 @@ export default class SourceReader {
   [I.PULLING] = null;
   [I.DONE] = false;
   [I.ERROR] = null;
+  [I.CONSUMED] = 0;
 
   constructor(stream) {
     this[I.STREAM] = stream;
@@ -21,12 +22,19 @@ export default class SourceReader {
     return this[I.ERROR];
   }
 
+  get consumedChunks() {
+    return this[I.CONSUMED];
+  }
+
   async read() {
-    // TODO: shared by every fork — lazily acquire the source reader once, then
-    //   single-flight on `I.PULLING`; `done` already → `{ done: true }`,
-    //   captured error → rethrow, else `reader.read()` and latch `I.DONE` /
-    //   `I.ERROR`. The awaited settle is the backpressure gate, and a
-    //   rejection must stay distinguishable so `_I.READ` can forward it.
+    // TODO: the device role only — lazily acquire the source reader once, then
+    //   read a chunk from it. Scheduling (whether to pull at all, single
+    //   flight, backpressure) belongs to the `Puller`.
+    //   - a delivered chunk bumps `I.CONSUMED`, the source-side progress —
+    //     the count of chunks taken out of the source, and the only progress
+    //     that survives the memory → degraded switch;
+    //   - whether `I.DONE` / `I.ERROR` are still needed here is TBD: the
+    //     stream's own reader already latches the terminal state.
     Ow.Error.Common('Not implemented');
   }
 
