@@ -8,7 +8,7 @@ import { BufferChunkReader } from './BufferChunkReader.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 import * as ChunkStash from './ChunkStash/index.mjs';
 import * as SourceReader from './SourceReader/index.mjs';
-import Puller from './Puller.mjs';
+import SourceConsumptionAgent from './SourceConsumptionAgent.mjs';
 import { isReadableStreamLike } from './Checker.mjs';
 import { I, $I, _S } from './Symbol.mjs';
 import { NonNegativeInteger } from './Parser.mjs';
@@ -39,7 +39,7 @@ class ReadableStreamDistributor extends EventTarget {
 
     this[I.CONSTRUCTOR] = new.target;
     this[I.SOURCE_READER] = new SourceReader.Concrete(source);
-    this[I.PULLER] = new Puller(this);
+    this[I.SOURCE_CONSUMPTION_AGENT] = new SourceConsumptionAgent(this);
   }
 
   get highWaterMark() {
@@ -60,7 +60,7 @@ class ReadableStreamDistributor extends EventTarget {
     }
 
     const bufferChunkReader = new BufferChunkReader(
-      this[I.PULLER],
+      this[I.SOURCE_CONSUMPTION_AGENT],
       this[I.BUFFER_STASH],
     );
 

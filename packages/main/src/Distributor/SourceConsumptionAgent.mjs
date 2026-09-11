@@ -3,14 +3,12 @@ import * as Ow from '@produck/ow';
 import * as ChunkStash from './ChunkStash/index.mjs';
 import { I, $I } from './Symbol.mjs';
 
-export default class Puller {
-  distributor;
-
+export default class SourceConsumptionAgent {
   constructor(distributor) {
     this.distributor = distributor;
   }
 
-  async pull(target) {
+  async ensure(target) {
     const {
       [I.SOURCE_READER]: sourceReader,
       [I.BUFFER_STASH]: buffer,
@@ -27,13 +25,12 @@ export default class Puller {
       return;
     }
 
-    const { value, done } = await sourceReader.read();
+    const chunk = await sourceReader.read();
+    const done = sourceReader.done;
 
-    if (degraded) {
-      return this.toTransferrer(value, done);
-    }
-
-    return this.toStash(value, done);
+    return degraded
+      ? this.toTransferrer(chunk, done)
+      : this.toStash(chunk, done);
   }
 
   toStash(chunk, done) {

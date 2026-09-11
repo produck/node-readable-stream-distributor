@@ -29,7 +29,7 @@ export default class SourceReader {
   async read() {
     // TODO: the device role only — lazily acquire the source reader once, then
     //   read a chunk from it. Scheduling (whether to pull at all, single
-    //   flight, backpressure) belongs to the `Puller`.
+    //   flight, backpressure) belongs to the `SourceConsumptionAgent`.
     //   - a delivered chunk bumps `I.CONSUMED`, the source-side progress —
     //     the count of chunks taken out of the source, and the only progress
     //     that survives the memory → degraded switch;

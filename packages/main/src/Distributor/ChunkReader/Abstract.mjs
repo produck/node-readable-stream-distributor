@@ -1,12 +1,12 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
 
-import { $I, _I } from './Symbol.mjs';
+import { I, $I, _I } from './Symbol.mjs';
 
 class AbstractChunkReader {
   [$I.CONSUMED] = 0;
 
-  constructor(puller, chunkStash) {
-    this[$I.PULLER] = puller;
+  constructor(sourceConsumptionAgent, chunkStash) {
+    this[I.SOURCE_CONSUMPTION_AGENT] = sourceConsumptionAgent;
     this[$I.CHUNK_STASH] = chunkStash;
   }
 
@@ -16,7 +16,7 @@ class AbstractChunkReader {
 
   async [$I.READ]() {
     // A satisfied target resolves at once, so pull first, then read.
-    await this[$I.PULLER].pull(this[$I.CONSUMED]);
+    await this[I.SOURCE_CONSUMPTION_AGENT].ensure(this[$I.CONSUMED]);
 
     const { value, done } = await this[_I.READ]();
 
