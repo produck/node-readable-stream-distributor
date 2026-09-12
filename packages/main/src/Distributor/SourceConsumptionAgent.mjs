@@ -9,11 +9,15 @@ export default class SourceConsumptionAgent {
   }
 
   async ensure(target) {
-    const {
-      [I.SOURCE_READER]: sourceReader,
-      [I.BUFFER_STASH]: buffer,
-      degraded,
-    } = this.distributor;
+    const sourceReader = this.distributor[I.SOURCE_READER];
+
+    if (sourceReader.done) {
+      return;
+    }
+
+    if (target < sourceReader.consumedChunks) {
+      return;
+    }
 
     // TODO: coalesce — all forks share this one object, so concurrent calls
     //   must settle together, with the largest `target` winning.
@@ -21,30 +25,26 @@ export default class SourceConsumptionAgent {
     //   has not settled.
     // TODO: degraded — the target has to be measured against the switched
     //   medium instead of this buffer.
-    if (buffer[ChunkStash.$I.DONE] || buffer.length > target) {
-      return;
-    }
-
     const chunk = await sourceReader.read();
     const done = sourceReader.done;
 
-    return degraded
+    return this.distributor.degraded
       ? this.toTransferrer(chunk, done)
       : this.toStash(chunk, done);
   }
 
   toStash(chunk, done) {
-    const { [I.BUFFER_STASH]: buffer } = this.distributor;
+    const { [I.CHUNK_STASH]: chunkStash } = this.distributor;
 
     if (done) {
-      buffer[ChunkStash.$I.DONE] = true;
+      chunkStash[ChunkStash.$I.SEALED] = true;
 
       return;
     }
 
-    buffer[ChunkStash.$I.PUSH](chunk);
+    chunkStash[ChunkStash.$I.PUSH](chunk);
 
-    if (buffer.byteLength > this.distributor.highWaterMark) {
+    if (chunkStash.byteLength > this.distributor.highWaterMark) {
       this.distributor[$I.DEGRADE]();
     }
   }

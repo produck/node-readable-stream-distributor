@@ -8,7 +8,7 @@ export class BufferChunkReader extends ChunkReader.Abstract {
 
     return {
       value: chunkStash.get(index),
-      done: index >= chunkStash.length && chunkStash[ChunkStash.$I.DONE],
+      done: index >= chunkStash.length && chunkStash[ChunkStash.$I.SEALED],
     };
   }
 }

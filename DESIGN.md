@@ -31,7 +31,7 @@
 
 - `get highWaterMark` → 委托静态 `[_S.HIGH_WATER_MARK]()`，默认
   `os.freemem()`
-- `get degraded` → 代理 `BUFFER_STASH.dropped`
+- `get degraded` → 代理 `CHUNK_STASH.dropped`
 
 （临时文件目录等存储要素不属分发器职责，由降级策略/子类自管。）
 
@@ -113,6 +113,7 @@ graph TD
 | `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/drop），读侧公开                       |
 | `ForkedReadableStream`        | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                             |
 | `SourceReader`                | 分发器侧拉取装置——单流 source reader 的 single-flight 包装（骨架）                                 |
+| `SourceConsumptionAgent`      | 源流消费代理（内部类）——按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享     |
 
 ### 类图
 
@@ -150,6 +151,13 @@ classDiagram
         +cancel()
     }
 
+    class SourceConsumptionAgent {
+        +distributor
+        +ensure(target)
+        +toStash(chunk, done)
+        +toTransferrer(chunk, done)
+    }
+
     class ForkedReadableStream {
         +distributor
     }
@@ -185,10 +193,15 @@ classDiagram
     AbstractChunkReader <|-- AbstractDegradedChunkReader
     AbstractDegradedChunkReader <|-- TemporaryFileChunkReader
 
-    ReadableStreamDistributor *-- ChunkStash : BUFFER_STASH
+    ReadableStreamDistributor *-- ChunkStash : CHUNK_STASH
     ReadableStreamDistributor *-- SourceReader : SOURCE_READER
+    ReadableStreamDistributor *-- SourceConsumptionAgent : SOURCE_CONSUMPTION_AGENT
     ReadableStreamDistributor "1" o-- "0..*" ForkedReadableStream : REGISTRY
     ForkedReadableStream "1" --> "1" AbstractChunkReader : CHUNK_READER
+    AbstractChunkReader "0..*" --> "1" SourceConsumptionAgent : ensure
+    SourceConsumptionAgent ..> SourceReader : read
+    SourceConsumptionAgent ..> ChunkStash : push + 封口
+    SourceConsumptionAgent ..> ReadableStreamDistributor : 触发 DEGRADE
     AbstractChunkReader ..> ChunkStash : 共享 chunkStash
     AbstractDegradedChunkReader ..> AbstractTransferrer : 静态 transferrer
     TemporaryFileChunkReader ..> AbstractTransferrer : 配套写侧
@@ -206,6 +219,9 @@ classDiagram
   `chunkStash` 按 index 读取。它是当前唯一的 chunk 载体。
 - `SourceReader` 与拷贝流无直接连线：拷贝只读自己的 ChunkReader，
   不接触 source（见「背压」）。
+- `SourceConsumptionAgent` 与分发器 1:1（构造器里就建），被所有拷贝
+  读取器共享：读取器只对它喊一句 `ensure`，"拉不拉、拉到哪、落到哪"全在
+  它手里。它只有 `distributor` 一个引用，且不进包入口。
 - `AbstractDegradedChunkReader` 的写侧不在继承链上，而以静态
   `transferrer` 外置到 `AbstractTransferrer`。
 
@@ -221,7 +237,8 @@ classDiagram
   - `index.mjs` + `Symbol.mjs`）。
 - **唯一特例：极端简化单文件**。无子类、无专属符号、无需独立导出
   入口的实现，可用单文件模式不建目录，平铺在与抽象类类目录平行的
-  位置，文件名即类名。当前仅 `BufferChunkReader` 采用
+  位置，文件名即类名。当前有 `BufferChunkReader`、
+  `SourceConsumptionAgent` 采用
   （`Distributor/BufferChunkReader.mjs`）。
 
 示例：
@@ -307,8 +324,8 @@ interface ChunkReader {
 `read()` 返回的 `{ value, done }` 里，两个信号必须分开表达：
 
 - **`done` 归叶子（`_I.READ`）**：只有叶子知道介质是否真的读完——
-  内存路径看 `ChunkStash.$I.DONE`，未来文件路径大概看文件末尾的特殊
-  标志。
+  内存路径看 `ChunkStash.$I.SEALED`（封口），未来文件路径大概看文件
+  末尾的特殊标志。
 - **"触达前沿"是另一套信号**：可用数据已消费到头、后面可能还有货，
   这与"结束"是两回事。不得拿"暂时没货"当 `done`。
 
@@ -402,7 +419,7 @@ BROWSER.md：分发器不 embody 文件系统概念）。分发器不维护
 
 各层自我管理边界：
 
-- **内存阶段**：`ChunkStash`（`BUFFER_STASH`）管理自身 chunk 边界
+- **内存阶段**：`ChunkStash`（`CHUNK_STASH`）管理自身 chunk 边界
   （`length` / `byteLength`）。
 - **降级阶段**：降级存储管理自身已写记录边界；降级 reader 读到自己
   存储的末尾即 `done`，无需分发器提供读水位。
@@ -459,7 +476,7 @@ sequenceDiagram
 ## 背压
 
 分发器不主动拉取 source。source 的推进由拷贝的消费驱动——
-拷贝的 `pull()` 触发 `source.read()`，拿到 chunk 后广播给所有
+拷贝的 `ensure()` 触发 `source.read()`，拿到 chunk 后广播给所有
 活跃拷贝（各自 `enqueue`）。
 
 慢拷贝不阻塞快拷贝——落后时走 TemporaryFileChunkReader 从磁盘回放即
@@ -547,9 +564,9 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
 分发器不维护统一的状态快照，也不暴露 `stats` 之类的聚合对象：可观察
 信号按数据归属分散在组件与受保护成员上。
 
-- 内存缓冲当前字节 / 块数：`BUFFER_STASH`（ChunkStash）的
+- 内存缓冲当前字节 / 块数：`CHUNK_STASH`（ChunkStash）的
   `byteLength` / `length`，由缓冲容器自管。
-- 是否进入降级：`distributor.degraded`（代理 `BUFFER_STASH.dropped`）。
+- 是否进入降级：`distributor.degraded`（代理 `CHUNK_STASH.dropped`）。
 - 当前活跃 fork 集合：`$I.REGISTRY`（活跃数即 `size`）。
 - 落盘 / 存储侧水位：降级 reader 与存储策略自管，分发器不感知。
 

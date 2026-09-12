@@ -10,7 +10,12 @@ export default class SourceReader {
   [I.ERROR] = null;
   [I.CONSUMED] = 0;
 
+  /** @param {ReadableStream} stream */
   constructor(stream) {
+    if (stream.locked) {
+      Ow.Error.Common('Source stream must not be locked');
+    }
+
     this[I.STREAM] = stream;
   }
 

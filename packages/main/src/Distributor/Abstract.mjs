@@ -14,7 +14,7 @@ import { I, $I, _S } from './Symbol.mjs';
 import { NonNegativeInteger } from './Parser.mjs';
 
 class ReadableStreamDistributor extends EventTarget {
-  [I.BUFFER_STASH] = new ChunkStash.Concrete();
+  [I.CHUNK_STASH] = new ChunkStash.Concrete();
   [I.DESTROYED] = false;
   [$I.REGISTRY] = new Set();
 
@@ -33,10 +33,6 @@ class ReadableStreamDistributor extends EventTarget {
       ThrowTypeError('source', 'a WHATWG ReadableStream');
     }
 
-    if (source.locked) {
-      Ow.Error.Common('Source stream must not be locked');
-    }
-
     this[I.CONSTRUCTOR] = new.target;
     this[I.SOURCE_READER] = new SourceReader.Concrete(source);
     this[I.SOURCE_CONSUMPTION_AGENT] = new SourceConsumptionAgent(this);
@@ -47,7 +43,7 @@ class ReadableStreamDistributor extends EventTarget {
   }
 
   get degraded() {
-    return this[I.BUFFER_STASH].dropped;
+    return this[I.CHUNK_STASH].dropped;
   }
 
   fork(label = '<UNDEFINED>') {
@@ -61,7 +57,7 @@ class ReadableStreamDistributor extends EventTarget {
 
     const bufferChunkReader = new BufferChunkReader(
       this[I.SOURCE_CONSUMPTION_AGENT],
-      this[I.BUFFER_STASH],
+      this[I.CHUNK_STASH],
     );
 
     const forked = new ForkedReadableStream.Concrete(
