@@ -15,16 +15,13 @@ class AbstractChunkReader {
   }
 
   async [$I.READ]() {
-    // A satisfied target resolves at once, so pull first, then read.
     await this[I.SOURCE_CONSUMPTION_AGENT].ensure(this[$I.CONSUMED]);
 
-    const { value, done } = await this[_I.READ]();
+    const result = await this[_I.READ]();
 
-    if (!done) {
-      this[$I.CONSUMED]++;
-    }
+    this[$I.CONSUMED]++;
 
-    return { value, done };
+    return result;
   }
 
   get consumedChunks() {

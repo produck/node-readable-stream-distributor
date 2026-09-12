@@ -8,6 +8,10 @@ export default class SourceConsumptionAgent {
     this.distributor = distributor;
   }
 
+  // Before the ChunkReader consumes it, the store is guaranteed ready —
+  // `ChunkStash` in the memory phase, the transferrer once degraded. The
+  // chunk at `target` is there, or the store is done; a source error rejects;
+  // a switch started inside has settled.
   async ensure(target) {
     const sourceReader = this.distributor[I.SOURCE_READER];
 
@@ -25,19 +29,20 @@ export default class SourceConsumptionAgent {
     //   has not settled.
     // TODO: degraded — the target has to be measured against the switched
     //   medium instead of this buffer.
-    const chunk = await sourceReader.read();
-    const done = sourceReader.done;
+    const { value, done } = await sourceReader.read();
 
-    return this.distributor.degraded
-      ? this.toTransferrer(chunk, done)
-      : this.toStash(chunk, done);
+    if (this.distributor.degraded) {
+      await this.toTransferrer(value, done);
+    } else {
+      await this.toStash(value, done);
+    }
   }
 
-  toStash(chunk, done) {
-    const { [I.CHUNK_STASH]: chunkStash } = this.distributor;
+  async toStash(chunk, done) {
+    const chunkStash = this.distributor[I.CHUNK_STASH];
 
     if (done) {
-      chunkStash[ChunkStash.$I.SEALED] = true;
+      chunkStash[ChunkStash.$I.SET_DONE]();
 
       return;
     }
@@ -45,11 +50,12 @@ export default class SourceConsumptionAgent {
     chunkStash[ChunkStash.$I.PUSH](chunk);
 
     if (chunkStash.byteLength > this.distributor.highWaterMark) {
-      this.distributor[$I.DEGRADE]();
+      chunkStash[ChunkStash.$I.SEAL]();
+      await this.distributor[$I.DEGRADE]();
     }
   }
 
-  toTransferrer(chunk, done) {
+  async toTransferrer(chunk, done) {
     // TODO: record the chunk — and the end — in the switched medium. Which
     //   transferrer instance serves this distributor is still open: the
     //   strategy configures one on its own reader class.

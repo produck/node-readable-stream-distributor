@@ -1,14 +1,16 @@
 import * as ChunkReader from './ChunkReader/index.mjs';
-import * as ChunkStash from './ChunkStash/index.mjs';
 
 export class BufferChunkReader extends ChunkReader.Abstract {
   async [ChunkReader._I.READ]() {
     const index = this[ChunkReader.$I.CONSUMED];
     const chunkStash = this.chunkStash;
+    const done = chunkStash.done && index >= chunkStash.length;
+    const result = { done, value: undefined };
 
-    return {
-      value: chunkStash.get(index),
-      done: index >= chunkStash.length && chunkStash[ChunkStash.$I.SEALED],
-    };
+    if (!done) {
+      result.value = chunkStash.get(index);
+    }
+
+    return result;
   }
 }

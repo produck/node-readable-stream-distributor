@@ -110,7 +110,7 @@ graph TD
 | `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                 |
 | `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧经静态 `transferrer` 外置                            |
 | `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的 `dump` / `write`                                                  |
-| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/drop），读侧公开                       |
+| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/seal/setDone/drop），读侧公开          |
 | `ForkedReadableStream`        | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                             |
 | `SourceReader`                | 分发器侧拉取装置——单流 source reader 的 single-flight 包装（骨架）                                 |
 | `SourceConsumptionAgent`      | 源流消费代理（内部类）——按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享     |
@@ -140,6 +140,8 @@ classDiagram
         +length
         +byteLength
         +dropped
+        +sealed
+        +done
         +get(index)
         +chunks()
     }
@@ -321,27 +323,32 @@ interface ChunkReader {
 
 ### 消费前沿与 done
 
-`read()` 返回的 `{ value, done }` 里，两个信号必须分开表达：
+`read()` 返回的 `{ value, done }` 是读结果（IteratorResult 形状）：
+`done: true` 时 `value` 必为 `undefined`——终止读天生不是一条数据。
 
-- **`done` 归叶子（`_I.READ`）**：只有叶子知道介质是否真的读完——
-  内存路径看 `ChunkStash.$I.SEALED`（封口），未来文件路径大概看文件
-  末尾的特殊标志。
-- **"触达前沿"是另一套信号**：可用数据已消费到头、后面可能还有货，
-  这与"结束"是两回事。不得拿"暂时没货"当 `done`。
+**`done` 由叶子按"存储层自身的终结事实 + 该拷贝自己的位置"判定**：
+
+- 内存路径：`stash.done && index >= stash.length`——`stash.done` 是内容
+  终结，`index >= length` 是这一拷贝自己的 backlog 闸，两者合起来才是
+  它的结束（这就是延迟暴露）。
+- 文件路径：介质里的末尾标志 + 各自读到的位置，同理。
+- 源已尽只在 `SourceReader` 判定一次，经**落点**交接进存储层（内存相位
+  `$I.SET_DONE()`，降级相位由 transferrer 记入介质）；此后分发流只问
+  存储层，不回头看源。
+
+**"触达前沿"不再由叶子表达**：`ensure()` 的契约是"返回时目标位置已可读，
+或存储层已终结"，所以叶子被调用时取不到货只可能是契约违规（实现侧按
+断言处理），不是一种要往下传的状态。
 
 驱动作用域固定在基类的受保护 `$I.READ`（每拷贝的驱动入口，包内唯一
 调用者是 `ForkedReadableStream.pull`）：
 
-- **推进**：只有它推进消费位置（非 `done` 才 `CONSUMED++`），因此
-  `CONSUMED` 的前进点全包只有一处。
-- **判定**：也只有它知道"要不要再进一步"——撞上介质前沿时催共享取块
-  层并 `await`（这个 `await` 就是背压闸），而不是返回假 `done`。
+- **推进**：它 `await ensure(CONSUMED)` → `await _I.READ()` → `CONSUMED++`
+  → 原样返回叶子的读结果。因此 `CONSUMED` 的前进点全包只有一处；它
+  计的是"读调用次数"，只有落在总数以内时才是"位置"。
+- **不关心 `done`**：读结果的形状与终态判定都归叶子，它只负责转发。
 - 降级家族**不覆写** `$I.READ`、也不走 `super`，只在 `_I.READ` 里
-  `await` 初始化后转发自家 `_I.READ`；基类推进对它们天然成立。
-
-前沿等待的**信号形态尚未定**（谁上报、"到货 / 封口"如何表达、与共享
-取块层"确保可用"如何衔接），实现时再定；但"等待必须由 Promise / 事件
-驱动、不得循环重查"已经确定。
+  `await` 初始化后转发自家 `_I.READ`；基类驱动对它们天然成立。
 
 ### 分叉架构
 
@@ -483,8 +490,8 @@ sequenceDiagram
 可，不参与 source 推进节奏。source 的速率由整体消费节奏决定，不由分发器
 预设。
 
-背压点只有一个：`Buffer[]` 已满且上一次 dump 尚未完成时，
-暂停 `source.read()`，dump 完成后恢复。即**磁盘写入带宽决定速率**。
+背压点只有一个：`ChunkStash` 超过 `highWaterMark` 且上一次 dump 尚未
+完成时，暂停 `source.read()`，dump 完成后恢复。即**磁盘写入带宽决定速率**。
 
 这与传统"木桶效应"（最慢消费者决定整体速率）不同——两级存储
 （内存→磁盘）切断了快慢消费者之间的耦合。快拷贝驱动 source

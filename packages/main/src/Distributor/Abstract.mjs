@@ -84,7 +84,7 @@ class ReadableStreamDistributor extends EventTarget {
 
   // TODO: dump the buffer into the switched medium, then swap every fork's
   //   reader, each positioned by its own `consumedChunks`.
-  [$I.DEGRADE]() {
+  async [$I.DEGRADE]() {
     Ow.Error.Common('Not implemented');
   }
 

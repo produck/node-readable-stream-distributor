@@ -55,16 +55,22 @@
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
   `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）· `$I.REGISTRY`（fork 集，
   `$I.PRUNE` 清理已取消 fork）。构造校验 source 为未锁定的 WHATWG ReadableStream。
-- 共享 stash 生命周期 create/push/drop **收口在分发器**。
+- 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（push /
+  `$I.SEAL()` / `$I.SET_DONE()`）归 `SourceConsumptionAgent`，dump→drop
+  归分发器。
+- 降级：**触发在消费代理**（水位越界），**执行在分发器** `$I.DEGRADE`——
+  遍历 registry、选降级 reader 类、换掉各 fork 的读取器都留在结构侧。
 
 ### ChunkStash（共享内存暂存）
 
-- 公开只读：`dropped` / `length` / `byteLength`；`get(index)` 带封存守卫；
-  `chunks()` 返回有序快照迭代器。
-- 写面受保护：`$I.PUSH(chunk)`、`$I.DROP()`——公开 drop 会泄漏"封存共享
-  内存"的能力，封存权归**分发器**（Transferrer 只管转存，不封存）。
-- 封口：保护级终态 `$I.SEALED`——内容已完整、不再进货，是"这一份可以整份
-  dump 出去"的标志；已封口且 `index >= length` 才算真 `done`。
+- 公开只读：`dropped` / `sealed` / `done` / `length` / `byteLength`；
+  `get(index)` 带封存守卫；`chunks()` 返回有序快照迭代器。
+- 写面受保护：`$I.PUSH(chunk)` / `$I.SEAL()` / `$I.SET_DONE()` / `$I.DROP()`
+  只在包内使用——公开它们会泄漏"封存共享内存"的能力（Transferrer
+  只管转存，不封存）。
+- 两个终态各管一件事：`sealed` = 整份 dump 前的写面冻结（**与源已尽
+  无关**）；`done` = 这一层存储自己的内容终态（由落点交接而来）。二者是
+  私有 `I` 成员，只经上面四个动作与 `get sealed` / `get done` 进出。
 
 ### Reader 术语
 
@@ -80,16 +86,15 @@
 
 - `$I`：`CONSUMED` / `CHUNK_STASH` / `READ`；`_I`：`READ`；公开只读
   `chunkStash` / `consumedChunks`。
-- `$I.READ` 无就绪屏障：`_I.READ()` → 非 done 则 `CONSUMED++` →
-  `{ value, done }`。它同时是消费前沿的推进点与"是否再进一步"的判定
-  位置（见「读路径」）。
+- `$I.READ`：`await ensure(CONSUMED)` → `_I.READ()` → `CONSUMED++` →
+  原样返回读结果；终态判定不在这里（见「读路径」）。
 - 不持初始化/关闭（已迁降级家族）；构造直接收 `chunkStash`（不包对象）。
 
 #### BufferChunkReader（内存 · 即时读）
 
-- 只实现 `_I.READ`（按 `CONSUMED` 下标读共享 stash，`done` 由
-  `stash.length` 决定）；构造即就绪——分发器无需请求初始化，也无需
-  close（无资源）。
+- 只实现 `_I.READ`（按 `CONSUMED` 下标读共享 stash；`done` 为
+  `stash.done` 且 `index >= stash.length`）；构造即就绪——分发器无需
+  请求初始化，也无需 close（无资源）。
 
 #### AbstractDegradedChunkReader（降级 · 生命周期持有者）
 
@@ -113,12 +118,14 @@
 
 ### 读路径
 
-- 基类 `$I.READ` 驱动统一承担 CONSUMED 推进（只在基类一处）。
-- `$I.READ` 同时是**前沿消费接触点**与**"是否再进一步"的判定位置**：
-  撞前沿时催共享取块层并 `await`（该 `await` 即背压闸），不得返回假
-  `done`；等待须 Promise / 事件驱动，不得循环重查（信号形态待定）。
-- **`done` 归 `_I.READ`**；"触达前沿" ≠ `done`——内存路径靠
-  `ChunkStash.$I.SEALED` 封口区分，未来文件路径靠末尾标志。
+- 基类 `$I.READ` 只做四件：`await ensure(CONSUMED)` → `await _I.READ()`
+  → `CONSUMED++` → 原样返回读结果；它不关心 `done`。
+- **`done` 归叶子**：内存路径 = `stash.done && index >= stash.length`
+  （存储层终态 + 自己的 backlog 闸）；文件路径 = 介质末尾标志 + 位置。
+- 前沿不往下传：`ensure()` 的契约是"返回时目标已可读，或存储层已终结"
+  （见 agent），所以叶子遇到"取不到货"属契约违规，实现侧按断言处理。
+- `CONSUMED` 计的是读调用次数，只有落在总数以内时才是"位置"；降级定位
+  拿它做 skip 时要注意这一点。
 - 降级读法：**不覆写 `$I.READ`、不走 super**，直接实现
   `AbstractChunkReader._I.READ`：`await I.INITIALIZED` → 转发自家
   `_I.READ`。基类驱动对降级实例天然成立；叶子只见降级 `_I` 空间。
@@ -178,7 +185,10 @@
   "推进消费 / 判定是否再进一步"的唯一作用域；`done` 归 `_I.READ`。
 - 内存路径末尾标志落定：`ChunkStash` 增加保护级封口 `$I.SEALED`，把
   "触达前沿"与"真 `done`"分开（`index >= length` 且已封口才算完）。
-- 待收敛：前沿信号形态、`$I.READ` 的等待方式，以及它与共享取块层
-  "确保可用"的衔接。
+- 09-13 修订：封口改归"整份 dump 前的冻结"，真 `done` 改由 `stash.done`
+  与自身位置判定，前沿改由 `ensure()` 的就绪契约吸收；下列"待收敛"两项
+  由此收口。
+- 待收敛（当时）：前沿信号形态、`$I.READ` 的等待方式，以及它与共享
+  取块层"确保可用"的衔接。
 
 现结论见上方：「读路径」/「消费前沿与 done」。

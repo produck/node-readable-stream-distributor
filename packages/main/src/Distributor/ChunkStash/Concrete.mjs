@@ -6,12 +6,21 @@ export default class ChunkStash {
   [I.CHUNKS] = [];
   [I.BYTE_LENGTH] = 0;
   [I.DROPPED] = false;
-  [$I.SEALED] = false;
+  [I.SEALED] = false;
+  [I.DONE] = false;
 
   [I.ASSERT_NOT_DROPPED]() {
     if (this[I.DROPPED]) {
       Ow.Error.Common('ChunkStash has been dropped');
     }
+  }
+
+  [$I.SEAL]() {
+    this[I.SEALED] = true;
+  }
+
+  [$I.SET_DONE]() {
+    this[I.DONE] = true;
   }
 
   [$I.PUSH](chunk) {
@@ -29,6 +38,14 @@ export default class ChunkStash {
 
   get dropped() {
     return this[I.DROPPED];
+  }
+
+  get sealed() {
+    return this[I.SEALED];
+  }
+
+  get done() {
+    return this[I.DONE];
   }
 
   get length() {
