@@ -96,7 +96,7 @@ class ReadableStreamDistributor extends EventTarget {
       );
 
       reader[DegradedChunkReader.$I.REQUEST_INITIALIZE](
-        forked[ForkedReadableStream.$I.CHUNK_READER].consumedChunks,
+        forked[ForkedReadableStream.$I.CHUNK_READER].consumedChunkCount,
       );
 
       forked[ForkedReadableStream.$I.CHUNK_READER] = reader;

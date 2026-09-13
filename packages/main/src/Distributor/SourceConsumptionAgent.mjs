@@ -6,6 +6,10 @@ import { I, $I } from './Symbol.mjs';
 export default class SourceConsumptionAgent {
   degraded = false;
 
+  // Contract: this constructor must not throw. The distributor builds it after
+  //   taking the source lock, so a throw here would leave a locked source with
+  //   no owner. Keep the body to plain assignments — no validation, no call
+  //   that can fail.
   constructor(distributor) {
     this.distributor = distributor;
   }
@@ -21,7 +25,7 @@ export default class SourceConsumptionAgent {
       return;
     }
 
-    if (target < sourceReader.consumedChunks) {
+    if (target < sourceReader.consumedChunkCount) {
       return;
     }
 

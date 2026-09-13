@@ -6,12 +6,12 @@ export const I = deepFreeze({
   SOURCE_CONSUMPTION_AGENT: I_SOURCE_CONSUMPTION_AGENT,
 });
 
-const $I_CONSUMED = Symbol('.$consumed');
+const $I_CONSUMED_CHUNK_COUNT = Symbol('.$consumedChunkCount');
 const $I_CHUNK_STASH = Symbol('.$chunkStash');
 const $I_READ = Symbol('.$read()');
 
 export const $I = deepFreeze({
-  CONSUMED: $I_CONSUMED,
+  CONSUMED_CHUNK_COUNT: $I_CONSUMED_CHUNK_COUNT,
   CHUNK_STASH: $I_CHUNK_STASH,
   READ: $I_READ,
 });

@@ -21,7 +21,7 @@
 
 - 层级：`I`/`S` = 实例/静态私有；`$I`/`$S` = 受保护；`_I`/`_S` = 抽象。
 - 方法符号带 `()` 后缀（`.$read()`、`._seek()`）；字段符号不带
-  （`.$consumed`）；描述符：实例 `.#*` / `.$*` / `._*`，静态 `S.*`。
+  （`.$consumedChunkCount`）；描述符：实例 `.#*` / `.$*` / `._*`，静态 `S.*`。
 - `index.mjs` 只导出受保护/抽象空间（`$I`/`$S`/`_I`/`_S`），**严格不导出
   私有 `I`/`S`**。
 - 单符号模块 ≤6 键；模块路径即命名空间——跨模块同词不冲突（降级
@@ -64,6 +64,27 @@
 - 降级：**触发在消费代理**（stash 字节超过 `stashByteLimit`），**执行在分发器** `$I.DEGRADE`——
   遍历 registry、选降级 reader 类、换掉各 fork 的读取器都留在结构侧。
 
+### SourceReader（分发器侧拉取装置）
+
+- **源的所有权**：构造时即 `getReader()` 锁死——给了分发器的源即被独占
+  整个生命周期。永不 `releaseLock()`，且这不是纪律而是结构事实：reader
+  只存在于私有 `I.READER`，外部无处取得释放机会；`stream.cancel()` 也被
+  锁挡死（锁定即拒，且不尝试取消）。前提：一个源只喂一个分发器、一个
+  分发器一生只用一个 reader。对外可见的外观是 `stream.locked` 恒为 true。
+- 三个事实位互斥穷尽：`done`（源到头，拉取触发）· `error`（源出错，
+  拉取触发）· `cancelled`（我们下过收摊令，同步置位）。三格：
+  `(done, error, cancelled)` = `(true, null, false)` 走完 ·
+  `(false, cause, false)` 源错 · `(false, null, true)` 我们收摊。
+- `cancel(reason)`：幂等（已置位即返回）；**先置位再转交**平台
+  `reader.cancel(reason)`；上游 cancel 回调失败时异常原样抛给调用者
+  （规范保证流仍关闭）。**不释放锁**：它只表示我们不要这个源了，
+  不表示把流还回去。
+- **收摊后的平台回声不采信**：`cancelled` 为真时 `read()` 既不写 `done`
+  也不写 `error`——否则平台对收摊令的回答会被当成源到头，收摊后
+  `read()` 的 TypeError 会冒充源错误。
+- 待收敛：第二次 `cancel()` 不等第一次 settle（要存 promise 闩锁，需先
+  腾键位）；`I.STREAM` 是死字段（构造写入、无人读），可删。
+
 ### ChunkStash（共享内存暂存）
 
 - 公开只读：`dropped` / `sealed` / `done` / `length` / `byteLength`；
@@ -87,15 +108,15 @@
 
 #### 基类 AbstractChunkReader = "有位置的读头"
 
-- `$I`：`CONSUMED` / `CHUNK_STASH` / `READ`；`_I`：`READ`；公开只读
-  `chunkStash` / `consumedChunks`。
-- `$I.READ`：`await ensure(CONSUMED)` → `_I.READ()` → `CONSUMED++` →
-  原样返回读结果；终态判定不在这里（见「读路径」）。
+- `$I`：`CONSUMED_CHUNK_COUNT` / `CHUNK_STASH` / `READ`；`_I`：`READ`；公开只读
+  `chunkStash` / `consumedChunkCount`。
+- `$I.READ`：`await ensure(CONSUMED_CHUNK_COUNT)` → `_I.READ()` → 叶子报非终态才
+  `CONSUMED_CHUNK_COUNT++` → 原样返回读结果；`done` 的含义不在这里（见「读路径」）。
 - 不持初始化/关闭（已迁降级家族）；构造直接收 `chunkStash`（不包对象）。
 
 #### BufferChunkReader（内存 · 即时读）
 
-- 只实现 `_I.READ`（按 `CONSUMED` 下标读共享 stash；`done` 为
+- 只实现 `_I.READ`（按 `CONSUMED_CHUNK_COUNT` 下标读共享 stash；`done` 为
   `stash.done` 且 `index >= stash.length`）；构造即就绪——分发器无需
   请求初始化，也无需 close（无资源）。
 
@@ -111,7 +132,7 @@
 ### 初始化与关闭（归降级家族）
 
 - 播种 = **请求初始化** `$I.REQUEST_INITIALIZE(progress)`：同步
-  `CONSUMED = progress` 后发起 `_I.INITIALIZE`（就绪由 `I.INITIALIZED`
+  `CONSUMED_CHUNK_COUNT = progress` 后发起 `_I.INITIALIZE`（就绪由 `I.INITIALIZED`
   承接）。曾用构造器传 `progress`、曾名 `START_INITIALIZE` + once-guard
   （均已废）。
 - **分发器是唯一调用者**（同一 tick：构造 → 请求初始化）；无守卫，
@@ -121,26 +142,26 @@
 
 ### 读路径
 
-- 基类 `$I.READ` 只做四件：`await ensure(CONSUMED)` → `await _I.READ()`
-  → `CONSUMED++` → 原样返回读结果；它不关心 `done`。
+- 基类 `$I.READ` 只做四件：`await ensure(CONSUMED_CHUNK_COUNT)` → `await _I.READ()`
+  → 非终态才 `CONSUMED_CHUNK_COUNT++` → 原样返回读结果；`done` 的含义不归它。
 - **`done` 归叶子**：内存路径 = `stash.done && index >= stash.length`
   （存储层终态 + 自己的 backlog 闸）；文件路径 = 介质末尾标志 + 位置。
 - 前沿不往下传：`ensure()` 的契约是"返回时目标已可读，或存储层已终结"
   （见 agent），所以叶子遇到"取不到货"属契约违规，实现侧按断言处理。
-- `CONSUMED` 计的是读调用次数，只有落在总数以内时才是"位置"；降级定位
-  拿它做 skip 时要注意这一点。
+- `CONSUMED_CHUNK_COUNT` 只在叶子交出内容时前进，因此总是"下一个要取的位置"；
+  终态那次读不推进。降级定位拿它做 skip 依赖这一点。
 - 降级读法：**不覆写 `$I.READ`、不走 super**，直接实现
   `AbstractChunkReader._I.READ`：`await I.INITIALIZED` → 转发自家
   `_I.READ`。基类驱动对降级实例天然成立；叶子只见降级 `_I` 空间。
 
 ### 切换定位（SEEK 属降级家族）
 
-- `CONSUMED` = fork 在共享序列的**绝对位置**（受保护）；切换时以各 fork
-  `consumedChunks` 作 `REQUEST_INITIALIZE` 的 progress（播种，非累计）。
+- `CONSUMED_CHUNK_COUNT` = fork 在共享序列的**绝对位置**（受保护）；切换时以各 fork
+  `consumedChunkCount` 作 `REQUEST_INITIALIZE` 的 progress（播种，非累计）。
 - 基类不含 `$I.SKIP` / `_I.SEEK`：定位是降级叶子 init 的职责，非通用
   驱动器。
 - 降级 `_I.SEEK`（`._seek()`）：推进一个 chunk 边界、不读 body；叶子在
-  `_I.INITIALIZE`（await dumping 屏障后）按 `CONSUMED` 自实现定位——
+  `_I.INITIALIZE`（await dumping 屏障后）按 `CONSUMED_CHUNK_COUNT` 自实现定位——
   逐界寻道或存储级 O(1) 跳转；抽象层不控制迭代。
 
 ### Transferrer（降级写侧 · 介质中性）
@@ -163,7 +184,7 @@
 
 ## 术语
 
-- seek = 寻道（光驱磁头找道，游标跨边界）；seed = 播种（给 `CONSUMED`
+- seek = 寻道（光驱磁头找道，游标跨边界）；seed = 播种（给 `CONSUMED_CHUNK_COUNT`
   初值）——不同词，不混用。
 - 内存→磁盘阶段切换称"降级（degraded）"（原 Fallback 术语已弃）。
 
@@ -179,7 +200,7 @@
   `REQUEST_INITIALIZE(progress)` 播种、删 guard → 初始化/关闭迁降级
   家族、基类收缩为"有位置的读头"。
 - SEEK：基类 `_I.SEEK`（配 `$I.SKIP`）→ 迁降级家族为寻道原语，叶子
-  自实现按位定位；`CONSUMED` 承载 fork 绝对位置。
+  自实现按位定位；`CONSUMED_CHUNK_COUNT` 承载 fork 绝对位置。
 - 现结论见上方：ChunkReader 家族 / 初始化与关闭 / 读路径 / 切换定位。
 
 ### 2026-09-10 — 前沿语义收敛（已压缩入上方，留作演进记录）

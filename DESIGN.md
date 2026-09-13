@@ -105,17 +105,17 @@ graph TD
 
 ### 模块
 
-| 模块                          | 职责                                                                                               |
-| ----------------------------- | -------------------------------------------------------------------------------------------------- |
-| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`stashByteLimit` 由下游实现                                |
-| `AbstractChunkReader`         | 拷贝侧读取抽象——持有共享 `chunkStash`；进度（`consumedChunks`）与前沿驱动（`$I.READ` → `_I.READ`） |
-| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                 |
-| `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧经静态 `transferrer` 外置                            |
-| `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的 `dump` / `write`                                                  |
-| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/seal/setDone/drop），读侧公开          |
-| `ForkedReadableStream`        | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                             |
-| `SourceReader`                | 分发器侧拉取装置——单流 source reader 的 single-flight 包装（骨架）                                 |
-| `SourceConsumptionAgent`      | 源流消费代理（内部类）——按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享     |
+| 模块                          | 职责                                                                                                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`stashByteLimit` 由下游实现                                                                                    |
+| `AbstractChunkReader`         | 拷贝侧读取抽象——持有共享 `chunkStash`；进度（`consumedChunkCount`）与前沿驱动（`$I.READ` → `_I.READ`）                                                 |
+| `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
+| `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧经静态 `transferrer` 外置                                                                                |
+| `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的 `dump` / `write`                                                                                                      |
+| `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/seal/setDone/drop），读侧公开                                                              |
+| `ForkedReadableStream`        | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                 |
+| `SourceReader`                | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态、计已消费块数），不含调度                                                          |
+| `SourceConsumptionAgent`      | 源流消费代理（内部类）——统筹调度（拉不拉、并发合并 single-flight、背压）与落点；按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享 |
 
 ### 类图
 
@@ -151,8 +151,10 @@ classDiagram
     class SourceReader {
         +done
         +error
+        +cancelled
+        +consumedChunkCount
         +read()
-        +cancel()
+        +cancel(reason)
     }
 
     class SourceConsumptionAgent {
@@ -169,7 +171,7 @@ classDiagram
     class AbstractChunkReader {
         <<abstract>>
         +chunkStash
-        +consumedChunks
+        +consumedChunkCount
     }
 
     class BufferChunkReader
@@ -217,12 +219,14 @@ classDiagram
 - `ReadableStreamDistributor` 与 `ForkedReadableStream` 分别以
   `EventTarget` / `ReadableStream` 为基类，继承自平台而非本模块。
 - `ForkedReadableStream` 与 `AbstractChunkReader` 是 1:1——每个拷贝
-  持有自己的读取器，进度（`consumedChunks`）天然 per-fork。
+  持有自己的读取器，进度（`consumedChunkCount`）天然 per-fork。
 - `ChunkStash` 由分发器持有并注入每个 `AbstractChunkReader`（`chunkStash`），
   因此所有拷贝读取器共享同一份；`BufferChunkReader` 经继承的
   `chunkStash` 按 index 读取。它是当前唯一的 chunk 载体。
 - `SourceReader` 与拷贝流无直接连线：拷贝只读自己的 ChunkReader，
-  不接触 source（见「背压」）。
+  不接触 source（见「背压」）。它在构造时即锁死源，并独占其整个生命
+  周期（永不 `releaseLock()`）：给分发器的源归它所有，直到分发器对象
+  死亡；`stream.locked` 恒为 true 就是对外可见的所有权外观。
 - `SourceConsumptionAgent` 与分发器 1:1（构造器里就建），被所有拷贝
   读取器共享：读取器只对它喊一句 `ensure`，"拉不拉、拉到哪、落到哪"全在
   它手里。它只有 `distributor` 一个引用，且不进包入口。
@@ -345,10 +349,11 @@ interface ChunkReader {
 驱动作用域固定在基类的受保护 `$I.READ`（每拷贝的驱动入口，包内唯一
 调用者是 `ForkedReadableStream.pull`）：
 
-- **推进**：它 `await ensure(CONSUMED)` → `await _I.READ()` → `CONSUMED++`
-  → 原样返回叶子的读结果。因此 `CONSUMED` 的前进点全包只有一处；它
-  计的是"读调用次数"，只有落在总数以内时才是"位置"。
-- **不关心 `done`**：读结果的形状与终态判定都归叶子，它只负责转发。
+- **推进**：它 `await ensure(CONSUMED_CHUNK_COUNT)` → `await _I.READ()`；叶子报非终态
+  才 `CONSUMED_CHUNK_COUNT++`，再原样返回叶子的读结果。因此前进点全包只有一处，
+  且只在真的交出内容时前进——它总是"下一个要取的位置"。
+- **不解释 `done`**：`done` 的含义与判定都归叶子，它只借这个标志决定是否推进，
+  并原样转发结果的形状。
 - 降级家族**不覆写** `$I.READ`、也不走 `super`，只在 `_I.READ` 里
   `await` 初始化后转发自家 `_I.READ`；基类驱动对它们天然成立。
 
@@ -576,6 +581,8 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
 - 内存缓冲当前字节 / 块数：`CHUNK_STASH`（ChunkStash）的
   `byteLength` / `length`，由缓冲容器自管。
 - 是否进入降级：`distributor.degraded`（代理消费代理的相位事实）。
+- 源侧终局：`SOURCE_READER`（SourceReader）的 `done` / `error` /
+  `cancelled`——源到头 / 源出错 / 我们收摊，三个终局互斥穷尽。
 - 当前活跃 fork 集合：`$I.REGISTRY`（活跃数即 `size`）。
 - 落盘 / 存储侧水位：降级 reader 与存储策略自管，分发器不感知。
 

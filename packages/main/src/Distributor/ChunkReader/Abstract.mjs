@@ -3,7 +3,7 @@ import Abstract, { Member as M } from '@produck/es-abstract';
 import { I, $I, _I } from './Symbol.mjs';
 
 class AbstractChunkReader {
-  [$I.CONSUMED] = 0;
+  [$I.CONSUMED_CHUNK_COUNT] = 0;
 
   constructor(sourceConsumptionAgent, chunkStash) {
     this[I.SOURCE_CONSUMPTION_AGENT] = sourceConsumptionAgent;
@@ -15,17 +15,21 @@ class AbstractChunkReader {
   }
 
   async [$I.READ]() {
-    await this[I.SOURCE_CONSUMPTION_AGENT].ensure(this[$I.CONSUMED]);
+    const agent = this[I.SOURCE_CONSUMPTION_AGENT];
+
+    await agent.ensure(this[$I.CONSUMED_CHUNK_COUNT]);
 
     const result = await this[_I.READ]();
 
-    this[$I.CONSUMED]++;
+    if (!result.done) {
+      this[$I.CONSUMED_CHUNK_COUNT]++;
+    }
 
     return result;
   }
 
-  get consumedChunks() {
-    return this[$I.CONSUMED];
+  get consumedChunkCount() {
+    return this[$I.CONSUMED_CHUNK_COUNT];
   }
 }
 
