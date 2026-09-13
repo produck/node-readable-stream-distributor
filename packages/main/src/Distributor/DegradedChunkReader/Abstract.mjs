@@ -11,13 +11,12 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   [I.INITIALIZED];
 
   constructor(...args) {
-    super(...args);
-
-    this[I.CONSTRUCTOR] = new.target;
-
     if (new.target.transferrer === undefined) {
       Ow.Error.Common('A transferrer must be configured before instantiation');
     }
+
+    super(...args);
+    this[I.CONSTRUCTOR] = new.target;
   }
 
   static get transferrer() {

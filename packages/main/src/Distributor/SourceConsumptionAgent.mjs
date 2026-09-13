@@ -4,6 +4,8 @@ import * as ChunkStash from './ChunkStash/index.mjs';
 import { I, $I } from './Symbol.mjs';
 
 export default class SourceConsumptionAgent {
+  degraded = false;
+
   constructor(distributor) {
     this.distributor = distributor;
   }
@@ -31,15 +33,16 @@ export default class SourceConsumptionAgent {
     //   medium instead of this buffer.
     const { value, done } = await sourceReader.read();
 
-    if (this.distributor.degraded) {
+    if (this.degraded) {
       await this.toTransferrer(value, done);
     } else {
-      await this.toStash(value, done);
+      this.toStash(value, done);
     }
   }
 
-  async toStash(chunk, done) {
-    const chunkStash = this.distributor[I.CHUNK_STASH];
+  toStash(chunk, done) {
+    const { distributor } = this;
+    const chunkStash = distributor[I.CHUNK_STASH];
 
     if (done) {
       chunkStash[ChunkStash.$I.SET_DONE]();
@@ -49,9 +52,10 @@ export default class SourceConsumptionAgent {
 
     chunkStash[ChunkStash.$I.PUSH](chunk);
 
-    if (chunkStash.byteLength > this.distributor.highWaterMark) {
+    if (chunkStash.byteLength > distributor.stashByteLimit) {
       chunkStash[ChunkStash.$I.SEAL]();
-      await this.distributor[$I.DEGRADE]();
+      this.degraded = true;
+      distributor[$I.DEGRADE]();
     }
   }
 

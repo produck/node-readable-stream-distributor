@@ -33,7 +33,7 @@ describe('ReadableStreamDistributor', () => {
     });
   });
 
-  describe('::highWaterMark', () => {
+  describe('::stashByteLimit', () => {
     it('should delegate to new.target static method', () => {
       const source = new ReadableStream({
         start(controller) {
@@ -44,8 +44,8 @@ describe('ReadableStreamDistributor', () => {
       const dist = new ReadableStreamDistributor(source);
 
       assert.equal(
-        dist.highWaterMark,
-        ReadableStreamDistributor.highWaterMark(),
+        dist.stashByteLimit,
+        ReadableStreamDistributor.stashByteLimit(),
       );
     });
 
@@ -57,15 +57,15 @@ describe('ReadableStreamDistributor', () => {
       });
 
       class Sub extends ReadableStreamDistributor {
-        static highWaterMark() {
+        static stashByteLimit() {
           return 1024;
         }
       }
 
       const dist = new Sub(source);
 
-      assert.equal(dist.highWaterMark, 1024);
-      assert.equal(Sub.highWaterMark(), 1024);
+      assert.equal(dist.stashByteLimit, 1024);
+      assert.equal(Sub.stashByteLimit(), 1024);
     });
   });
 
@@ -144,7 +144,7 @@ describe('ReadableStreamDistributor', () => {
   });
 
   describe('memory → file phase transition', () => {
-    it('should switch to file when buffer exceeds highWaterMark', () => {
+    it('should switch to file when the buffer exceeds stashByteLimit', () => {
       // TODO
     });
 

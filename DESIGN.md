@@ -29,9 +29,11 @@
 `ReadableStreamDistributor` 是**抽象类**——不能直接 `new`，下游须继承；
 默认实现可按需覆盖。
 
-- `get highWaterMark` → 委托静态 `[_S.HIGH_WATER_MARK]()`，默认
+- `get stashByteLimit` → 委托静态 `[_S.STASH_BYTE_LIMIT]()`，默认
   `os.freemem()`
-- `get degraded` → 代理 `CHUNK_STASH.dropped`
+- `get degraded` → 代理 `SourceConsumptionAgent` 的相位事实
+- `[_S.DEGRADED_CHUNK_READER]` → 策略侧给出的降级读取器类，degrade 时用它
+  就地构造各 fork 的新读取器
 
 （临时文件目录等存储要素不属分发器职责，由降级策略/子类自管。）
 
@@ -45,7 +47,7 @@ import { ReadableStreamDistributor } from '@produck/readable-stream-distributor'
 class MyDistributor extends ReadableStreamDistributor {}
 const distributor = new MyDistributor(source);
 
-// 注意：一旦溢出到磁盘后，highWaterMark 不再被查询（单向门）
+// 注意：一旦溢出到磁盘后，stashByteLimit 不再被查询（单向门）
 
 const copy = distributor.fork('sha1-checker');
 // label：助记符，用于事件和统计中标识拷贝，不作唯一性约束
@@ -105,7 +107,7 @@ graph TD
 
 | 模块                          | 职责                                                                                               |
 | ----------------------------- | -------------------------------------------------------------------------------------------------- |
-| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`highWaterMark` 由下游实现                                 |
+| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`stashByteLimit` 由下游实现                                |
 | `AbstractChunkReader`         | 拷贝侧读取抽象——持有共享 `chunkStash`；进度（`consumedChunks`）与前沿驱动（`$I.READ` → `_I.READ`） |
 | `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                 |
 | `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧经静态 `transferrer` 外置                            |
@@ -130,7 +132,7 @@ classDiagram
 
     class ReadableStreamDistributor {
         <<abstract>>
-        +highWaterMark
+        +stashByteLimit
         +degraded
         +fork(label)
         +destroy()
@@ -301,7 +303,7 @@ title Chunk 文件格式
 切换文件时，先将 `Buffer[]` 内容按文件格式写入，清空数组，
 后续 chunk 直接走文件。
 
-内存→磁盘是单向门：一旦切换，`highWaterMark` 后续变化不再
+内存→磁盘是单向门：一旦切换，`stashByteLimit` 后续变化不再
 生效——木已成舟，不再回头。
 
 ## Chunk 读取器
@@ -490,7 +492,7 @@ sequenceDiagram
 可，不参与 source 推进节奏。source 的速率由整体消费节奏决定，不由分发器
 预设。
 
-背压点只有一个：`ChunkStash` 超过 `highWaterMark` 且上一次 dump 尚未
+背压点只有一个：`ChunkStash` 超过 `stashByteLimit` 且上一次 dump 尚未
 完成时，暂停 `source.read()`，dump 完成后恢复。即**磁盘写入带宽决定速率**。
 
 这与传统"木桶效应"（最慢消费者决定整体速率）不同——两级存储
@@ -563,7 +565,7 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
 
 ### 纯内存模式
 
-下游在 `get highWaterMark()` 中返回 `Number.MAX_SAFE_INTEGER`
+下游在 `get stashByteLimit()` 中返回 `Number.MAX_SAFE_INTEGER`
 即可事实上禁用磁盘溢出。
 
 ## 可观测性
@@ -573,7 +575,7 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
 
 - 内存缓冲当前字节 / 块数：`CHUNK_STASH`（ChunkStash）的
   `byteLength` / `length`，由缓冲容器自管。
-- 是否进入降级：`distributor.degraded`（代理 `CHUNK_STASH.dropped`）。
+- 是否进入降级：`distributor.degraded`（代理消费代理的相位事实）。
 - 当前活跃 fork 集合：`$I.REGISTRY`（活跃数即 `size`）。
 - 落盘 / 存储侧水位：降级 reader 与存储策略自管，分发器不感知。
 

@@ -24,8 +24,10 @@ export const $I = deepFreeze({
   DEGRADE: $I_DEGRADE,
 });
 
-const S_HIGH_WATER_MARK = Symbol('._highWaterMark()');
+const S_STASH_BYTE_LIMIT = Symbol('._stashByteLimit()');
+const S_DEGRADED_CHUNK_READER = Symbol('._degradedChunkReader');
 
 export const _S = deepFreeze({
-  HIGH_WATER_MARK: S_HIGH_WATER_MARK,
+  STASH_BYTE_LIMIT: S_STASH_BYTE_LIMIT,
+  DEGRADED_CHUNK_READER: S_DEGRADED_CHUNK_READER,
 });

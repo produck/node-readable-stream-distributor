@@ -99,7 +99,7 @@ Promise"这一事实：
   阻塞；逐块 `await` 写盘时控制权让回事件循环，不饿死其他任务。
 - **局部停靠**：只有依赖降级数据、正 `await dumping` 的 reader 续延
   被挂起；仍在内存阶段或已追平的 fork 不受影响。
-- **量级**：低水标时转存量小，停靠可忽略；高水标 + 慢盘时停靠时长
+- **量级**：`stashByteLimit` 低时转存量小、停靠可忽略；高 + 慢盘时停靠时长
   随转存量线性放大，成为感知抖动源。
 - **深度优化方向（future work）**：让降级 reader 在 dump 追加过程中
   增量可读——不等待"全量 dump 完成"这一单点，按各 fork 进度无缝
@@ -176,7 +176,7 @@ Promise"这一事实：
 
 ## 背景与目标
 
-`Buffer[]` 累计超过 `highWaterMark` 时，分发器从内存阶段切换到
+`ChunkStash` 累计超过 `stashByteLimit` 时，分发器从内存阶段切换到
 文件阶段。切换必须是**可靠的**——任何拷贝在任何时刻都只能读到
 连续完整前缀，不允许读到半截 chunk 或跳号。
 
@@ -191,7 +191,7 @@ Promise"这一事实：
 
 ### 1. 触发与状态机
 
-- 何时判定需要切换？`Buffer[]` 累计超过 `highWaterMark` 即触发？
+- 何时判定需要切换？`ChunkStash` 累计超过 `stashByteLimit` 即触发？
   是否需要二次确认（避免瞬态抖动）？
 - 三态模型：`in-memory` / `switching` / `in-file`。
   `switching` 是瞬态还是可持续状态？
@@ -210,14 +210,20 @@ Promise"这一事实：
       （含迟到）消费者。
 - [ ] switching 期间新 `fork()` 的拷贝 → 拿到的 reader 指向何物？
 - [ ] 切换途中某拷贝 `cancel` / `destroy` → 未完成的 reader 怎么办？
+- [ ] **在途 `read` 仍绑旧读器**：`pull` 先取 `$I.CHUNK_READER` 再调
+      `$I.READ`，而 `$I.READ` 内的 `ensure()` 期间会换读器——`this` 仍是旧
+      的内存读器；DROP 之后它再读即抛 `ChunkStash has been dropped`
+      （实测：DROP 前读旧 stash 的块正常，DROP 后抛）。可选收法：`pull`
+      在 `ensure()` 之后重取读器 / 不 DROP 而把相位事实改为 `stash.sealed` /
+      接受此窗口。
 - [x] 慢拷贝落后：skip 位置 = 该拷贝 `consumedChunks`，如何保证
       切换瞬间读到的是已 dump 的边界？
       已解：skip 到位在 init 过程中，`read()` await init 后才读文件。
 - [ ] dump 期间 source 有新数据到达 → 先入 buffer 还是直接入文件？
 
 > 剩余未决项集中在**分发器侧调度**：切换触发与 `dump()` 调用时机、
-> 同 tick 原子换读器、切换中 `fork`/`cancel`/`destroy` 行为、source
-> 暂停/恢复衔接。
+> 同 tick 原子换读器、切换中 `fork`/`cancel`/`destroy` 行为、在途
+> `read` 的旧读器窗口、source 暂停/恢复衔接。
 
 ### 3. 协调原语
 

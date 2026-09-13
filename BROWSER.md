@@ -32,7 +32,7 @@ The `ChunkReader` hierarchy already reflects this split:
   it during init via the `chunkStashDumping` getter, so reads never see a
   half-dumped target.
 
-The current shape already fits: `highWaterMark` is the knob the distributor
+The current shape already fits: `stashByteLimit` is the knob the distributor
 asks downstream for; the degradation backend is delivered as a reader +
 transferrer pair. A future refactor would:
 

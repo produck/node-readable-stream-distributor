@@ -5,6 +5,8 @@ import { ThrowTypeError } from '@produck/type-error';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import { BufferChunkReader } from './BufferChunkReader.mjs';
+import * as DegradedChunkReader from './DegradedChunkReader/index.mjs';
+import * as Event from './Event.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
 import * as ChunkStash from './ChunkStash/index.mjs';
 import * as SourceReader from './SourceReader/index.mjs';
@@ -18,12 +20,12 @@ class ReadableStreamDistributor extends EventTarget {
   [I.DESTROYED] = false;
   [$I.REGISTRY] = new Set();
 
-  static [_S.HIGH_WATER_MARK]() {
+  static [_S.STASH_BYTE_LIMIT]() {
     return os.freemem();
   }
 
-  static get highWaterMark() {
-    return this[_S.HIGH_WATER_MARK]();
+  static get stashByteLimit() {
+    return this[_S.STASH_BYTE_LIMIT]();
   }
 
   constructor(source) {
@@ -38,12 +40,12 @@ class ReadableStreamDistributor extends EventTarget {
     this[I.SOURCE_CONSUMPTION_AGENT] = new SourceConsumptionAgent(this);
   }
 
-  get highWaterMark() {
-    return this[I.CONSTRUCTOR].highWaterMark;
+  get stashByteLimit() {
+    return this[I.CONSTRUCTOR].stashByteLimit;
   }
 
   get degraded() {
-    return this[I.CHUNK_STASH].dropped;
+    return this[I.SOURCE_CONSUMPTION_AGENT].degraded;
   }
 
   fork(label = '<UNDEFINED>') {
@@ -67,7 +69,7 @@ class ReadableStreamDistributor extends EventTarget {
     );
 
     this[$I.REGISTRY].add(forked);
-    this.dispatchEvent(new Event('fork'));
+    this.dispatchEvent(new Event.Fork(forked));
 
     return forked;
   }
@@ -82,15 +84,38 @@ class ReadableStreamDistributor extends EventTarget {
     }
   }
 
-  // TODO: dump the buffer into the switched medium, then swap every fork's
-  //   reader, each positioned by its own `consumedChunks`.
   async [$I.DEGRADE]() {
-    Ow.Error.Common('Not implemented');
+    const DegradedReader = this[I.CONSTRUCTOR][_S.DEGRADED_CHUNK_READER];
+    const chunkStash = this[I.CHUNK_STASH];
+    const dumping = DegradedReader.transferrer.dump(chunkStash);
+
+    for (const forked of this[$I.REGISTRY]) {
+      const reader = new DegradedReader(
+        this[I.SOURCE_CONSUMPTION_AGENT],
+        chunkStash,
+      );
+
+      reader[DegradedChunkReader.$I.REQUEST_INITIALIZE](
+        forked[ForkedReadableStream.$I.CHUNK_READER].consumedChunks,
+      );
+
+      forked[ForkedReadableStream.$I.CHUNK_READER] = reader;
+    }
+
+    try {
+      await dumping;
+    } catch (cause) {
+      this.dispatchEvent(new Event.Warn('dump-failed', cause));
+
+      return;
+    }
+
+    chunkStash[ChunkStash.$I.DROP]();
   }
 
   destroy() {
     this[I.DESTROYED] = true;
-    this.dispatchEvent(new Event('destroy'));
+    this.dispatchEvent(new Event.Destroy());
 
     // TODO: stop pulling, error live forks after drain (via their controllers)
     //   and prune the registry, release the source reader
@@ -101,6 +126,7 @@ class ReadableStreamDistributor extends EventTarget {
 export default Abstract(
   ReadableStreamDistributor,
   Abstract.Static({
-    [_S.HIGH_WATER_MARK]: M.Method().returns(NonNegativeInteger),
+    [_S.STASH_BYTE_LIMIT]: M.Method().returns(NonNegativeInteger),
+    [_S.DEGRADED_CHUNK_READER]: M.Function,
   }),
 );

@@ -32,8 +32,11 @@
 
 - 公开静态 getter 委托 `_S` 抽象；实例经构造时捕获的 `I.CONSTRUCTOR`
   （`new.target`）委托静态侧（不用 `this.constructor`）。
-- `highWaterMark` 默认 `os.freemem()`；`Parser.mjs` 提供 `.returns`
+- `stashByteLimit` 默认 `os.freemem()`；`Parser.mjs` 提供 `.returns`
   解析器（如 `NonNegativeInteger`）。
+- `_S.DEGRADED_CHUNK_READER`：策略侧给出的降级读取器类引用，degrade 时
+  用它构造各 fork 的新读取器；暂以 `M.Function` 弱校（只确认是函数），
+  待收敛为“必须是降级家族的子类”。
 
 ## 观点 / 决策 / 结论
 
@@ -50,15 +53,15 @@
 - `extends EventTarget`（WHATWG，不依赖 Node EventEmitter）。
 - 公开面：`fork(label = '<UNDEFINED>')` 注册消费拷贝并返回
   `ForkedReadableStream`（`label` 助记符，默认占位串 `'<UNDEFINED>'`，
-  须为 string）；`get highWaterMark`（委托静态）；`get degraded`（代理
-  `CHUNK_STASH.dropped`）；`destroy()` 为 TODO。
+  须为 string）；`get stashByteLimit`（委托静态）；`get degraded`（代理
+  消费代理的相位事实）；`destroy()` 为 TODO。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
   `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）· `$I.REGISTRY`（fork 集，
   `$I.PRUNE` 清理已取消 fork）。构造校验 source 为未锁定的 WHATWG ReadableStream。
 - 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（push /
   `$I.SEAL()` / `$I.SET_DONE()`）归 `SourceConsumptionAgent`，dump→drop
   归分发器。
-- 降级：**触发在消费代理**（水位越界），**执行在分发器** `$I.DEGRADE`——
+- 降级：**触发在消费代理**（stash 字节超过 `stashByteLimit`），**执行在分发器** `$I.DEGRADE`——
   遍历 registry、选降级 reader 类、换掉各 fork 的读取器都留在结构侧。
 
 ### ChunkStash（共享内存暂存）
