@@ -62,7 +62,7 @@ export default class ForkedReadableStream extends ReadableStream {
     return this[I.CHUNK_READER];
   }
 
-  set [$I.CHUNK_READER](reader) {
+  [$I.SET_DEGRADED_CHUNK_READER](reader) {
     this[I.CHUNK_READER] = reader;
   }
 }

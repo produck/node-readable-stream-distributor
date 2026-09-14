@@ -6,6 +6,8 @@ const I_DONE = Symbol('.#done');
 const I_ERROR = Symbol('.#error');
 const I_CANCELLED = Symbol('.#cancelled');
 const I_CONSUMED_CHUNK_COUNT = Symbol('.#consumedChunkCount');
+const I_READING = Symbol('.#reading');
+const I_READ = Symbol('.#read()');
 
 export const I = deepFreeze({
   STREAM: I_STREAM,
@@ -14,4 +16,6 @@ export const I = deepFreeze({
   ERROR: I_ERROR,
   CANCELLED: I_CANCELLED,
   CONSUMED_CHUNK_COUNT: I_CONSUMED_CHUNK_COUNT,
+  READING: I_READING,
+  READ: I_READ,
 });

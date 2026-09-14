@@ -177,8 +177,9 @@
 
 ### ForkedReadableStream（流面）
 
-- `extends ReadableStream`；`$I.CHUNK_READER` 受保护 get/set 换读器契约
-  口（分发器替换 reader 用）；`$I.CANCELLED` 供 `$I.PRUNE`。
+- `extends ReadableStream`；`get $I.CHUNK_READER` 读当前读器，
+  `$I.SET_DEGRADED_CHUNK_READER(reader)` 是唯一的换入口（降级时用，只此
+  一次）；`$I.CANCELLED` 供 `$I.PRUNE`。
 - `start` 在 `super()` 内同步执行（TDZ）：用局部变量捕获 controller，
   `super()` 后桥入 `I.CONTROLLER`；`pull` / `cancel` 异步可安全用 `this`。
 

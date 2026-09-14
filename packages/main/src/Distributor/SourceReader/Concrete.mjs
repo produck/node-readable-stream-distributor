@@ -7,6 +7,7 @@ export default class SourceReader {
   [I.ERROR] = null;
   [I.CANCELLED] = false;
   [I.CONSUMED_CHUNK_COUNT] = 0;
+  [I.READING] = null;
 
   /** @param {ReadableStream} stream */
   constructor(stream) {
@@ -34,7 +35,11 @@ export default class SourceReader {
     return this[I.CONSUMED_CHUNK_COUNT];
   }
 
-  async read() {
+  get reading() {
+    return this[I.READING];
+  }
+
+  async [I.READ]() {
     const result = await this[I.READER].read().catch((cause) => {
       if (!this[I.CANCELLED]) {
         this[I.ERROR] = cause;
@@ -52,6 +57,14 @@ export default class SourceReader {
     }
 
     return result;
+  }
+
+  read() {
+    if (this[I.READING] === null) {
+      this[I.READING] = this[I.READ]().finally(() => (this[I.READING] = null));
+    }
+
+    return this[I.READING];
   }
 
   async cancel(reason) {

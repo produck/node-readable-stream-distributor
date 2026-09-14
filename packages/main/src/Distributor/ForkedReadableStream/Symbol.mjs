@@ -16,8 +16,10 @@ export const I = deepFreeze({
 
 const $I_CANCELLED = Symbol('.$cancelled');
 const $I_CHUNK_READER = Symbol('.$chunkReader');
+const $I_SET_DEGRADED_CHUNK_READER = Symbol('.$setDegradedChunkReader()');
 
 export const $I = deepFreeze({
   CANCELLED: $I_CANCELLED,
   CHUNK_READER: $I_CHUNK_READER,
+  SET_DEGRADED_CHUNK_READER: $I_SET_DEGRADED_CHUNK_READER,
 });

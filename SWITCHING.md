@@ -50,8 +50,8 @@
 - **ChunkReader**（`ChunkReader/`）：纯读取装置，只维护自身进度
   （`$I.CONSUMED_CHUNK_COUNT`），不接触分发器共享状态。
 - **ForkedReadableStream**（`ForkedReadableStream/`）：面向消费者的
-  流面，只经 `I.CHUNK_READER` 与其 `$I.CHUNK_READER` 保护存取器交互，
-  对协调无感。
+  流面，只经 `I.CHUNK_READER` 与 `$I.CHUNK_READER` getter ·
+  `$I.SET_DEGRADED_CHUNK_READER()` 交互，对协调无感。
 - 跨模块共享状态访问一律走明确的契约接口，不得越权直接写。
 
 ## 已收敛设计：`init` Promise 屏障
@@ -261,5 +261,6 @@ Promise"这一事实：
 
 - dump 使用 `fs.promises.open` + FileHandle（DESIGN.md 已假定
   `fileHandle.read/write`），异步 I/O。
-- `ForkedReadableStream.$I.CHUNK_READER` 保护存取器（get/set）是换读器
-  的契约接口，切换实现将基于它。
+- `ForkedReadableStream.$I.CHUNK_READER`（getter）与
+  `$I.SET_DEGRADED_CHUNK_READER(reader)`（一次性换入）是换读器的契约
+  接口，切换实现将基于它。

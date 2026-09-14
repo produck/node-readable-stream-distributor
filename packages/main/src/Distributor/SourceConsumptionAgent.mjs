@@ -5,6 +5,8 @@ import { I, $I } from './Symbol.mjs';
 
 export default class SourceConsumptionAgent {
   degraded = false;
+  pulling = null;
+  pulledChunkCount = 0;
 
   // Contract: this constructor must not throw. The distributor builds it after
   //   taking the source lock, so a throw here would leave a locked source with
@@ -19,28 +21,37 @@ export default class SourceConsumptionAgent {
   // chunk at `target` is there, or the store is done; a source error rejects;
   // a switch started inside has settled.
   async ensure(target) {
-    const sourceReader = this.distributor[I.SOURCE_READER];
+    const { distributor } = this;
+    const sourceReader = distributor[I.SOURCE_READER];
 
-    if (sourceReader.done) {
-      return;
-    }
-
-    if (target < sourceReader.consumedChunkCount) {
-      return;
-    }
-
-    // TODO: coalesce — all forks share this one object, so concurrent calls
-    //   must settle together, with the largest `target` winning.
+    // `pulledChunkCount` is this agent's own account of the hand-offs, not the
+    //   store's: one per chunk handed over, whichever store took it. `pull`
+    //   settles a chunk only once it is readable — that storage contract is
+    //   what lets the judge trust this count. The choice of store is `pull`'s.
     // TODO: backpressure — hold off while the buffer is full and the last dump
     //   has not settled.
-    // TODO: degraded — the target has to be measured against the switched
-    //   medium instead of this buffer.
-    const { value, done } = await sourceReader.read();
+    while (target >= this.pulledChunkCount && !sourceReader.done) {
+      if (this.pulling === null) {
+        this.pulling = this.pull().finally(() => (this.pulling = null));
+      }
+
+      await this.pulling;
+    }
+  }
+
+  async pull() {
+    const { value, done } = await this.distributor[I.SOURCE_READER].read();
 
     if (this.degraded) {
       await this.toTransferrer(value, done);
     } else {
       this.toStash(value, done);
+    }
+
+    // Counting here — not in `ensure` after the await — is what makes each
+    //   pull counted exactly once: every waiter joins this same pull.
+    if (!done) {
+      this.pulledChunkCount++;
     }
   }
 
@@ -56,6 +67,7 @@ export default class SourceConsumptionAgent {
 
     chunkStash[ChunkStash.$I.PUSH](chunk);
 
+    // NEED DEGRADING???
     if (chunkStash.byteLength > distributor.stashByteLimit) {
       chunkStash[ChunkStash.$I.SEAL]();
       this.degraded = true;

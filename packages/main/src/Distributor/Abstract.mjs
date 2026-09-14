@@ -90,16 +90,13 @@ class ReadableStreamDistributor extends EventTarget {
     const dumping = DegradedReader.transferrer.dump(chunkStash);
 
     for (const forked of this[$I.REGISTRY]) {
-      const reader = new DegradedReader(
-        this[I.SOURCE_CONSUMPTION_AGENT],
-        chunkStash,
-      );
+      const agent = this[I.SOURCE_CONSUMPTION_AGENT];
+      const reader = new DegradedReader(agent, chunkStash);
+      const bufferChunkReader = forked[ForkedReadableStream.$I.CHUNK_READER];
+      const progress = bufferChunkReader.consumedChunkCount;
 
-      reader[DegradedChunkReader.$I.REQUEST_INITIALIZE](
-        forked[ForkedReadableStream.$I.CHUNK_READER].consumedChunkCount,
-      );
-
-      forked[ForkedReadableStream.$I.CHUNK_READER] = reader;
+      reader[DegradedChunkReader.$I.REQUEST_INITIALIZE](progress);
+      forked[ForkedReadableStream.$I.SET_DEGRADED_CHUNK_READER](reader);
     }
 
     try {
