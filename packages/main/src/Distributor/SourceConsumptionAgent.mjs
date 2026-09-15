@@ -24,10 +24,6 @@ export default class SourceConsumptionAgent {
     const { distributor } = this;
     const sourceReader = distributor[I.SOURCE_READER];
 
-    // `pulledChunkCount` is this agent's own account of the hand-offs, not the
-    //   store's: one per chunk handed over, whichever store took it. `pull`
-    //   settles a chunk only once it is readable — that storage contract is
-    //   what lets the judge trust this count. The choice of store is `pull`'s.
     // TODO: backpressure — hold off while the buffer is full and the last dump
     //   has not settled.
     while (target >= this.pulledChunkCount && !sourceReader.done) {

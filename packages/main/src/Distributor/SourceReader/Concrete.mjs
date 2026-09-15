@@ -6,7 +6,6 @@ export default class SourceReader {
   [I.DONE] = false;
   [I.ERROR] = null;
   [I.CANCELLED] = false;
-  [I.CONSUMED_CHUNK_COUNT] = 0;
   [I.READING] = null;
 
   /** @param {ReadableStream} stream */
@@ -31,10 +30,6 @@ export default class SourceReader {
     return this[I.CANCELLED];
   }
 
-  get consumedChunkCount() {
-    return this[I.CONSUMED_CHUNK_COUNT];
-  }
-
   get reading() {
     return this[I.READING];
   }
@@ -50,10 +45,6 @@ export default class SourceReader {
 
     if (!this[I.CANCELLED]) {
       this[I.DONE] = result.done;
-    }
-
-    if (!result.done) {
-      this[I.CONSUMED_CHUNK_COUNT]++;
     }
 
     return result;
