@@ -57,13 +57,16 @@
 - `extends EventTarget`（WHATWG，不依赖 Node EventEmitter）。
 - 公开面：`fork(label = '<UNDEFINED>')` 注册消费拷贝并返回
   `ForkedReadableStream`（`label` 助记符，默认占位串 `'<UNDEFINED>'`，
-  须为 string）；`get stashByteLimit`（委托静态）；`get degraded`
-  （代理消费代理的相位事实）；`destroy()` 为 TODO。
+  须为 string）——读器取自当前相位字段 `I.CURRENT_CHUNK_READER_CTOR`
+  （初值 `BufferChunkReader`，降级换读器的同一同步块里翻成策略类，后者
+  当场 `$I.REQUEST_INITIALIZE(0)` 播种）；`get stashByteLimit`（委托
+  静态）；`get degraded`（代理消费代理的相位事实）；`destroy()` 为 TODO。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
   `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）· `$I.REGISTRY`（fork 集，
-  `$I.PRUNE` 清理已取消 fork）· `I.CTOR`（捕获的自身类）与
-  `I.DEGRADED_CHUNK_READER_CTOR` / `I.TRANSFERRER_CTOR`（两级类值
-  getter）。受保护侧另有写侧实例与其待用构造参数：`$I.TRANSFERRER` /
+  `$I.PRUNE` 清理已取消 fork）· `I.CTOR`（捕获的自身类）· 两个类值
+  getter `I.DEGRADED_CHUNK_READER_CTOR` / `I.TRANSFERRER_CTOR`，以及当前
+  相位字段 `I.CURRENT_CHUNK_READER_CTOR`（初值 `BufferChunkReader`，降级
+  换读器时置为前者）。受保护侧另有写侧实例与其待用构造参数：`$I.TRANSFERRER` /
   `$I.SET_TRANSFERRER_ARGS(...)`（落 `I.TRANSFERRER_ARGS`，分发器只存转、
   不解释）。构造校验 source 为未锁定的 WHATWG ReadableStream。
 - 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（push /

@@ -19,6 +19,7 @@ const { Transferrer } = DegradedChunkReader;
 
 class ReadableStreamDistributor extends EventTarget {
   [I.CHUNK_STASH] = new ChunkStash.Concrete();
+  [I.CURRENT_CHUNK_READER_CTOR] = BufferChunkReader;
   [I.DESTROYED] = false;
   [I.TRANSFERRER_ARGS] = [];
   [$I.TRANSFERRER] = null;
@@ -61,16 +62,17 @@ class ReadableStreamDistributor extends EventTarget {
       Ow.Error.Common('Distributor has been destroyed');
     }
 
-    const bufferChunkReader = new BufferChunkReader(
-      this[I.SOURCE_CONSUMPTION_AGENT],
-      this[I.CHUNK_STASH],
-    );
+    const agent = this[I.SOURCE_CONSUMPTION_AGENT];
+    const stash = this[I.CHUNK_STASH];
+    const transferrer = this[$I.TRANSFERRER];
+    const ChunkReaderImpl = this[I.CURRENT_CHUNK_READER_CTOR];
+    const chunkReader = new ChunkReaderImpl(agent, stash, transferrer);
 
-    const forked = new ForkedReadableStream.Concrete(
-      this,
-      bufferChunkReader,
-      label,
-    );
+    if (ChunkReaderImpl === this[I.DEGRADED_CHUNK_READER_CTOR]) {
+      chunkReader[DegradedChunkReader.$I.REQUEST_INITIALIZE](0);
+    }
+
+    const forked = new ForkedReadableStream.Concrete(this, chunkReader, label);
 
     this[$I.REGISTRY].add(forked);
     this.dispatchEvent(new Event.Fork(forked));
@@ -119,6 +121,7 @@ class ReadableStreamDistributor extends EventTarget {
     const dumping = transferrer[Transferrer.$I.DUMP](stash);
 
     this[$I.TRANSFERRER] = transferrer;
+    this[I.CURRENT_CHUNK_READER_CTOR] = DegradedChunkReaderImpl;
 
     for (const forked of this[$I.REGISTRY]) {
       const reader = new DegradedChunkReaderImpl(agent, stash, transferrer);

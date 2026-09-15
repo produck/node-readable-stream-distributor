@@ -34,6 +34,8 @@
 - `get degraded` → 代理 `SourceConsumptionAgent` 的相位事实
 - `[_S.DEGRADED_CHUNK_READER_CTOR]` → 策略侧给出的降级读取器类，degrade
   时用它就地构造各 fork 的新读取器
+- 新 `fork()` 的读器取自当前相位字段 `I.CURRENT_CHUNK_READER_CTOR`（初值
+  内存类，降级换读器时翻成上面那个策略类）
 
 （临时文件目录等存储要素不属分发器职责，由降级策略/子类自管。）
 
@@ -314,7 +316,8 @@ title Chunk 文件格式
 ## Chunk 读取器
 
 **术语**：`ChunkReader` —— 一片一片读取 chunk 的概念装置。每个拷贝
-持有独立的 `ChunkReader`，策略切换时替换读取器，提前 skip 到位。
+持有独立的 `ChunkReader`，策略切换时替换读取器，提前 skip 到位；
+切换之后新建的拷贝取当前相位字段，故也是降级读器。
 
 与 `source reader`（从源流拉取的 reader）区分：`ChunkReader` 是拷贝
 侧的读取装置，`source reader` 是分发器侧的拉取装置，二者职责不同，
@@ -511,6 +514,13 @@ sequenceDiagram
 
 背压点只有一个：`ChunkStash` 超过 `stashByteLimit` 且上一次 dump 尚未
 完成时，暂停 `source.read()`，dump 完成后恢复。即**磁盘写入带宽决定速率**。
+
+这一背压是**拉取粒度**的：dump 在途时那一趟拉取的落点（`$I.WRITE`）
+被屏障挡住，于是该趟拉取串行化。但消费者感知到的更粗的一层是**读侧
+屏障**——降级读器诞生后先 `await` dumping 才读，所以慢盘下连"读一个
+早已就绪的块"也要等（实测 20ms 的 dump → 15ms）。`ensure()` 的 join 已
+收窄为只在"源已闩、落点未落地"时等待（2026-09-15），只覆盖绑定在内存
+读器上的等待者；消除读侧屏障需换读器后移，见 `SWITCHING.md` §6。
 
 这与传统"木桶效应"（最慢消费者决定整体速率）不同——两级存储
 （内存→磁盘）切断了快慢消费者之间的耦合。快拷贝驱动 source

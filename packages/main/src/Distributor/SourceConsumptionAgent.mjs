@@ -33,7 +33,7 @@ export default class SourceConsumptionAgent {
       await this.pulling;
     }
 
-    if (this.pulling !== null) {
+    if (sourceReader.done && this.pulling !== null) {
       await this.pulling;
     }
   }

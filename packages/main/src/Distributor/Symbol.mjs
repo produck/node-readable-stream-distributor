@@ -5,6 +5,7 @@ const I_SOURCE_READER = Symbol('.#sourceReader');
 const I_SOURCE_CONSUMPTION_AGENT = Symbol('.#sourceConsumptionAgent');
 const I_CHUNK_STASH = Symbol('.#chunkStash');
 const I_DEGRADED_CHUNK_READER_CTOR = Symbol('.#degradedChunkReaderCtor');
+const I_CURRENT_CHUNK_READER_CTOR = Symbol('.#currentChunkReaderCtor');
 const I_TRANSFERRER_ARGS = Symbol('.#transferrerArgs');
 const I_TRANSFERRER_CTOR = Symbol('.#transferrerCtor');
 const I_DESTROYED = Symbol('.#destroyed');
@@ -15,6 +16,7 @@ export const I = deepFreeze({
   SOURCE_CONSUMPTION_AGENT: I_SOURCE_CONSUMPTION_AGENT,
   CHUNK_STASH: I_CHUNK_STASH,
   DEGRADED_CHUNK_READER_CTOR: I_DEGRADED_CHUNK_READER_CTOR,
+  CURRENT_CHUNK_READER_CTOR: I_CURRENT_CHUNK_READER_CTOR,
   TRANSFERRER_ARGS: I_TRANSFERRER_ARGS,
   TRANSFERRER_CTOR: I_TRANSFERRER_CTOR,
   DESTROYED: I_DESTROYED,
