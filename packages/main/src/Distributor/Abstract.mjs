@@ -15,9 +15,13 @@ import { isReadableStreamLike } from './Checker.mjs';
 import { I, $I, _S } from './Symbol.mjs';
 import { NonNegativeInteger } from './Parser.mjs';
 
+const { Transferrer } = DegradedChunkReader;
+
 class ReadableStreamDistributor extends EventTarget {
   [I.CHUNK_STASH] = new ChunkStash.Concrete();
   [I.DESTROYED] = false;
+  [I.TRANSFERRER_ARGS] = [];
+  [$I.TRANSFERRER] = null;
   [$I.REGISTRY] = new Set();
 
   static [_S.STASH_BYTE_LIMIT]() {
@@ -28,10 +32,6 @@ class ReadableStreamDistributor extends EventTarget {
     return this[_S.STASH_BYTE_LIMIT]();
   }
 
-  static get DegradedChunkReader() {
-    return this[_S.DEGRADED_CHUNK_READER];
-  }
-
   constructor(source) {
     super();
 
@@ -39,19 +39,13 @@ class ReadableStreamDistributor extends EventTarget {
       ThrowTypeError('source', 'a WHATWG ReadableStream');
     }
 
-    this[I.CONSTRUCTOR] = new.target;
+    this[I.CTOR] = new.target;
     this[I.SOURCE_READER] = new SourceReader.Concrete(source);
     this[I.SOURCE_CONSUMPTION_AGENT] = new SourceConsumptionAgent(this);
   }
 
   get stashByteLimit() {
-    return this[I.CONSTRUCTOR].stashByteLimit;
-  }
-
-  // The class the strategy configured for the switch; the transferrer that
-  //   writes the switched medium hangs on it.
-  get DegradedChunkReader() {
-    return this[I.CONSTRUCTOR].DegradedChunkReader;
+    return this[I.CTOR].stashByteLimit;
   }
 
   get degraded() {
@@ -94,14 +88,40 @@ class ReadableStreamDistributor extends EventTarget {
     }
   }
 
+  [$I.SET_TRANSFERRER_ARGS](...args) {
+    if (this[$I.TRANSFERRER] !== null) {
+      Ow.Error.Common('Transferrer args have been consumed');
+    }
+
+    //TODO check args
+    this[I.TRANSFERRER_ARGS] = args;
+  }
+
+  get [I.DEGRADED_CHUNK_READER_CTOR]() {
+    return this[I.CTOR][_S.DEGRADED_CHUNK_READER_CTOR];
+  }
+
+  get [I.TRANSFERRER_CTOR]() {
+    const DegradedChunkReaderImpl = this[I.DEGRADED_CHUNK_READER_CTOR];
+
+    return DegradedChunkReaderImpl[DegradedChunkReader._S.TRANSFERRER_CTOR];
+  }
+
   async [$I.DEGRADE]() {
-    const DegradedReader = this[I.CONSTRUCTOR][_S.DEGRADED_CHUNK_READER];
-    const chunkStash = this[I.CHUNK_STASH];
-    const dumping = DegradedReader.transferrer.dump(chunkStash);
+    const {
+      [I.DEGRADED_CHUNK_READER_CTOR]: DegradedChunkReaderImpl,
+      [I.TRANSFERRER_CTOR]: TransferrerImpl,
+    } = this;
+
+    const agent = this[I.SOURCE_CONSUMPTION_AGENT];
+    const stash = this[I.CHUNK_STASH];
+    const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
+    const dumping = transferrer[Transferrer.$I.DUMP](stash);
+
+    this[$I.TRANSFERRER] = transferrer;
 
     for (const forked of this[$I.REGISTRY]) {
-      const agent = this[I.SOURCE_CONSUMPTION_AGENT];
-      const reader = new DegradedReader(agent, chunkStash);
+      const reader = new DegradedChunkReaderImpl(agent, stash, transferrer);
       const bufferChunkReader = forked[ForkedReadableStream.$I.CHUNK_READER];
       const progress = bufferChunkReader.consumedChunkCount;
 
@@ -117,7 +137,7 @@ class ReadableStreamDistributor extends EventTarget {
       return;
     }
 
-    chunkStash[ChunkStash.$I.DROP]();
+    stash[ChunkStash.$I.DROP]();
   }
 
   destroy() {
@@ -134,6 +154,6 @@ export default Abstract(
   ReadableStreamDistributor,
   Abstract.Static({
     [_S.STASH_BYTE_LIMIT]: M.Method().returns(NonNegativeInteger),
-    [_S.DEGRADED_CHUNK_READER]: M.Function,
+    [_S.DEGRADED_CHUNK_READER_CTOR]: M.Function,
   }),
 );

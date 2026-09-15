@@ -1,4 +1,5 @@
 import * as ChunkStash from './ChunkStash/index.mjs';
+import { Transferrer } from './DegradedChunkReader/index.mjs';
 import { I, $I } from './Symbol.mjs';
 
 export default class SourceConsumptionAgent {
@@ -75,20 +76,19 @@ export default class SourceConsumptionAgent {
 
   async toTransferrer(chunk, done) {
     const { distributor } = this;
-    const chunkStash = distributor[I.CHUNK_STASH];
-    const transferrer = distributor.DegradedChunkReader.transferrer;
+    const transferrer = distributor[$I.TRANSFERRER];
 
     // TODO: this flag is process-local — a strategy that needs the end
     //   recorded in its own medium would have to extend the transferrer
     //   contract.
     if (done) {
-      transferrer.setDone(chunkStash);
+      transferrer[Transferrer.$I.SET_DONE]();
 
       return;
     }
 
     // `write` settles only once the chunk is readable — it waits for the dump
     //   first, which is the order this agent's watermark relies on.
-    await transferrer.write(chunkStash, chunk);
+    await transferrer[Transferrer.$I.WRITE](chunk);
   }
 }

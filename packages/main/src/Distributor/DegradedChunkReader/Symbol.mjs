@@ -1,19 +1,19 @@
 import { deepFreeze } from '@produck/deep-freeze-enumerable';
 
-const I_CONSTRUCTOR = Symbol('.#constructor');
 const I_INITIALIZED = Symbol('.#initialized');
 const I_CLOSED = Symbol('.#closed');
 
 export const I = deepFreeze({
-  CONSTRUCTOR: I_CONSTRUCTOR,
   INITIALIZED: I_INITIALIZED,
   CLOSED: I_CLOSED,
 });
 
+const $I_TRANSFERRER = Symbol('.$transferrer');
 const $I_REQUEST_INITIALIZE = Symbol('.$requestInitialize()');
 const $I_CLOSE = Symbol('.$close()');
 
 export const $I = deepFreeze({
+  TRANSFERRER: $I_TRANSFERRER,
   REQUEST_INITIALIZE: $I_REQUEST_INITIALIZE,
   CLOSE: $I_CLOSE,
 });
@@ -30,8 +30,8 @@ export const _I = deepFreeze({
   SEEK: _I_SEEK,
 });
 
-const S_TRANSFERRER = Symbol('S.transferrer');
+const _S_TRANSFERRER_CTOR = Symbol('._transferrerCtor');
 
-export const S = deepFreeze({
-  TRANSFERRER: S_TRANSFERRER,
+export const _S = deepFreeze({
+  TRANSFERRER_CTOR: _S_TRANSFERRER_CTOR,
 });

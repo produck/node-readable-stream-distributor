@@ -24,19 +24,23 @@
   （`.$consumedChunkCount`）；描述符：实例 `.#*` / `.$*` / `._*`，静态 `S.*`。
 - `index.mjs` 只导出受保护/抽象空间（`$I`/`$S`/`_I`/`_S`），**严格不导出
   私有 `I`/`S`**。
-- 单符号模块 ≤6 键；模块路径即命名空间——跨模块同词不冲突（降级
-  `_I.READ` 与基类 `_I.READ` 各自独立）。
+- 模块路径即命名空间——跨模块同词不冲突（降级 `_I.READ` 与基类 `_I.READ`
+  各自独立）；符号表的键数不设上限。
 - 面向调用者的具名成员（getter、`chunkStash`）用普通字符串键。
+- 缩写白名单：构造器（`new.target` 捕获）→ `CTOR`。**符号键持有类值一律
+  以 `_CTOR` 结尾**（`_S.DEGRADED_CHUNK_READER_CTOR` /
+  `_S.TRANSFERRER_CTOR`）。组织级共享符号集（待建）收编这类通用含义的
+  键，避免每个模块重复声明。
 
 ### Static + instance 委托
 
-- 公开静态 getter 委托 `_S` 抽象；实例经构造时捕获的 `I.CONSTRUCTOR`
+- 公开静态 getter 委托 `_S` 抽象；实例经构造时捕获的 `I.CTOR`
   （`new.target`）委托静态侧（不用 `this.constructor`）。
 - `stashByteLimit` 默认 `os.freemem()`；`Parser.mjs` 提供 `.returns`
   解析器（如 `NonNegativeInteger`）。
-- `_S.DEGRADED_CHUNK_READER`：策略侧给出的降级读取器类引用，degrade 时
-  用它构造各 fork 的新读取器；暂以 `M.Function` 弱校（只确认是函数），
-  待收敛为“必须是降级家族的子类”。
+- `_S.DEGRADED_CHUNK_READER_CTOR`：策略侧给出的降级读取器类引用，
+  degrade 时用它构造各 fork 的新读取器；暂以 `M.Function` 弱校（只确认
+  是函数），待收敛为“必须是降级家族的子类”。
 
 ## 观点 / 决策 / 结论
 
@@ -53,17 +57,22 @@
 - `extends EventTarget`（WHATWG，不依赖 Node EventEmitter）。
 - 公开面：`fork(label = '<UNDEFINED>')` 注册消费拷贝并返回
   `ForkedReadableStream`（`label` 助记符，默认占位串 `'<UNDEFINED>'`，
-  须为 string）；`get stashByteLimit`（委托静态）；`get DegradedChunkReader`
-  （静态/实例同名，策略配置的降级读取器类，介质侧的 transferrer 挂在
-  它上面）；`get degraded`（代理消费代理的相位事实）；`destroy()` 为 TODO。
+  须为 string）；`get stashByteLimit`（委托静态）；`get degraded`
+  （代理消费代理的相位事实）；`destroy()` 为 TODO。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
   `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）· `$I.REGISTRY`（fork 集，
-  `$I.PRUNE` 清理已取消 fork）。构造校验 source 为未锁定的 WHATWG ReadableStream。
+  `$I.PRUNE` 清理已取消 fork）· `I.CTOR`（捕获的自身类）与
+  `I.DEGRADED_CHUNK_READER_CTOR` / `I.TRANSFERRER_CTOR`（两级类值
+  getter）。受保护侧另有写侧实例与其待用构造参数：`$I.TRANSFERRER` /
+  `$I.SET_TRANSFERRER_ARGS(...)`（落 `I.TRANSFERRER_ARGS`，分发器只存转、
+  不解释）。构造校验 source 为未锁定的 WHATWG ReadableStream。
 - 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（push /
   `$I.SEAL()` / `$I.SET_DONE()`）归 `SourceConsumptionAgent`，dump→drop
   归分发器。
 - 降级：**触发在消费代理**（stash 字节超过 `stashByteLimit`），**执行在分发器** `$I.DEGRADE`——
-  遍历 registry、选降级 reader 类、换掉各 fork 的读取器都留在结构侧。
+  构造写侧实例（按读器家族 `_S.TRANSFERRER_CTOR` + 预置构造参数）、
+  执行其 `dump`、遍历 registry、选降级 reader 类、换掉各 fork 的读取器
+  都留在结构侧。
 
 ### SourceReader（分发器侧拉取装置）
 
@@ -123,9 +132,11 @@
 
 #### AbstractDegradedChunkReader（降级 · 生命周期持有者）
 
-- `I`：`CONSTRUCTOR` / `INITIALIZED` / `CLOSED`；`$I`：`REQUEST_INITIALIZE`
-  / `CLOSE`；`_I`：`READ` / `INITIALIZE` / `CLOSE` / `SEEK`；`S`：
-  `TRANSFERRER`（一次性静态配置，未配置不能 `new`）。
+- `I`：`INITIALIZED` / `CLOSED`；`$I`：`TRANSFERRER` / `REQUEST_INITIALIZE`
+  / `CLOSE`；`_I`：`READ` / `INITIALIZE` / `CLOSE` / `SEEK`；`_S`：
+  `TRANSFERRER_CTOR`（策略给出的写侧**类**）。
+- `$I.TRANSFERRER` 是降级时由分发器交接的那个写侧实例（基类构造第三
+  个参数），屏障 `chunkStashDumping` 由它取。
 - 初始化经 `I.INITIALIZED`（`_I.INITIALIZE` 返回的 Promise）承接；
   `_I.INITIALIZE` 默认实现 = dumping 屏障（`chunkStashDumping`）；叶子要
   open + 定位则覆写它。
@@ -168,17 +179,21 @@
 ### Transferrer（降级写侧 · 介质中性）
 
 - `AbstractDegradedChunkReader` 纯读；写侧抽为家族内部抽象
-  `AbstractTransferrer`：`dump(chunkStash)`（整块迁移，不含封存）、
-  `async write(chunkStash, buffer)`（先等该 stash dumping 屏障再续写）、
-  `getDumping(chunkStash)`；抽象实例 `_I.DUMP` / `_I.WRITE` 由下游实现；
-  per-stash dumping / done 收在 Transferrer 实例（WeakMap / WeakSet）。
-- 完成标志 `setDone(chunkStash)` / `getDone(chunkStash)` 与 stash 侧
-  `$I.SET_DONE()` / `done` 同形，但落点换人：降级相位的落点交接记在
+  `AbstractTransferrer`：受保护 `$I.DUMP(chunkStash)`（整块迁移，不含
+  封存）/ `$I.WRITE(buffer)`（先等本实例的 dumping 屏障再续写）/
+  `$I.SET_DONE()` 三个驱动只给分发器与 agent；读侧公开 `get dumping` /
+  `get done`。抽象实例 `_I.DUMP(chunkStash)` / `_I.WRITE(buffer)` 由下游
+  实现。
+- 实例与 `ChunkStash` 1:1，因此状态就是普通字段（`dumping` / `done`），
+  不再用 WeakMap / WeakSet 按 stash 键控。
+- 完成标志 `$I.SET_DONE()` / `get done` 与 stash 侧 `$I.SET_DONE()` /
+  `done` 同形（连分层也一致），但落点换人：降级相位的落点交接记在
   transferrer 上（源已尽那一趟拉取由 agent 同步置位，无屏障——拉取串行
   等待 `write`，到位时"此前每块已可读"已成立）。降级叶子据此判终态。
-- **配对**：具体 reader 类静态成员 `transferrer` 一次性配置（守卫：
-  一次性 + `instanceof AbstractTransferrer`）；转存产物（文件名/偏移等）
-  经降级策略自备 WeakMap 传递，属降级策略内部细节。
+- **配对**：写侧**类**由降级读器家族声明（`_S.TRANSFERRER_CTOR`，
+  基类静态抽象）；分发器在降级时取它构造实例并持有（`$I.TRANSFERRER`），
+  再交接给各拷贝的新读取器。实例与 `ChunkStash` 1:1，因此不再需要
+  一次性守卫与 `instanceof` 校验。转存产物可留在实例自己的字段里。
 
 ### ForkedReadableStream（流面）
 

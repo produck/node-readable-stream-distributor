@@ -8,6 +8,16 @@ export const I = deepFreeze({
   DONE: I_DONE,
 });
 
+const $I_DUMP = Symbol('.$dump()');
+const $I_WRITE = Symbol('.$write()');
+const $I_SET_DONE = Symbol('.$setDone()');
+
+export const $I = deepFreeze({
+  DUMP: $I_DUMP,
+  WRITE: $I_WRITE,
+  SET_DONE: $I_SET_DONE,
+});
+
 const _I_DUMP = Symbol('._dump()');
 const _I_WRITE = Symbol('._write()');
 

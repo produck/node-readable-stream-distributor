@@ -32,8 +32,8 @@
 - `get stashByteLimit` → 委托静态 `[_S.STASH_BYTE_LIMIT]()`，默认
   `os.freemem()`
 - `get degraded` → 代理 `SourceConsumptionAgent` 的相位事实
-- `[_S.DEGRADED_CHUNK_READER]` → 策略侧给出的降级读取器类，degrade 时用它
-  就地构造各 fork 的新读取器
+- `[_S.DEGRADED_CHUNK_READER_CTOR]` → 策略侧给出的降级读取器类，degrade
+  时用它就地构造各 fork 的新读取器
 
 （临时文件目录等存储要素不属分发器职责，由降级策略/子类自管。）
 
@@ -110,8 +110,8 @@ graph TD
 | `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`stashByteLimit` 由下游实现                                                                                    |
 | `AbstractChunkReader`         | 拷贝侧读取抽象——持有共享 `chunkStash`；进度（`consumedChunkCount`）与前沿驱动（`$I.READ` → `_I.READ`）                                                 |
 | `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
-| `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧经静态 `transferrer` 外置                                                                                |
-| `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的 `dump` / `write`                                                                                                      |
+| `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                     |
+| `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE`，读侧 `get dumping` / `get done`                                         |
 | `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/seal/setDone/drop），读侧公开                                                              |
 | `ForkedReadableStream`        | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                 |
 | `SourceReader`                | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态、计已消费块数），不含调度                                                          |
@@ -184,9 +184,8 @@ classDiagram
 
     class AbstractTransferrer {
         <<abstract>>
-        +dump(chunkStash)
-        +write(chunkStash, buffer)
-        +getDumping(chunkStash)
+        +dumping
+        +done
     }
 
     class TemporaryFileChunkReader {
@@ -209,8 +208,9 @@ classDiagram
     SourceConsumptionAgent ..> ChunkStash : push + 封口
     SourceConsumptionAgent ..> ReadableStreamDistributor : 触发 DEGRADE
     AbstractChunkReader ..> ChunkStash : 共享 chunkStash
-    AbstractDegradedChunkReader ..> AbstractTransferrer : 静态 transferrer
-    TemporaryFileChunkReader ..> AbstractTransferrer : 配套写侧
+    ReadableStreamDistributor "1" o-- "0..1" AbstractTransferrer : 降级时构造
+    AbstractDegradedChunkReader ..> AbstractTransferrer : 家族静态声明写侧类
+    TemporaryFileChunkReader ..> AbstractTransferrer : 同策略配套写侧
     SourceReader ..> ReadableStream : 包住 source reader
 ```
 
@@ -230,8 +230,9 @@ classDiagram
 - `SourceConsumptionAgent` 与分发器 1:1（构造器里就建），被所有拷贝
   读取器共享：读取器只对它喊一句 `ensure`，"拉不拉、拉到哪、落到哪"全在
   它手里。它只有 `distributor` 一个引用，且不进包入口。
-- `AbstractDegradedChunkReader` 的写侧不在继承链上，而以静态
-  `transferrer` 外置到 `AbstractTransferrer`。
+- `AbstractDegradedChunkReader` 的写侧不在继承链上：家族静态声明写侧类
+  （`_S.TRANSFERRER_CTOR`），分发器降级时用它构造实例并持有，
+  再交接给各拷贝的新读取器。
 
 ### 目录安排约定
 
@@ -379,19 +380,30 @@ graph BT
     （`_I.INITIALIZE`）`await` 该 stash 的 **dumping 屏障**
     （`chunkStashDumping`，仅阻塞、不提供产物），`read()` / `close()`
     await 初始化完成——转存完成前绝不读。
-  - **写侧不在此类**：具体 reader 通过一次性静态成员 `transferrer`
-    配置一个 `AbstractTransferrer` 实例；初始化经
-    `I.CONSTRUCTOR.transferrer` 取屏障。
-  - 转存产物经降级策略自备的 WeakMap 传递；`id` / 文件名等是降级
-    策略内部细节，非分发器职责。
+  - **写侧不在此类**：写侧类由家族静态 `_S.TRANSFERRER_CTOR`
+    声明；分发器在降级时用它构造实例并持有，交接给本读取器。构造
+    参数由策略经 `$I.SET_TRANSFERRER_ARGS` 预置、分发器原样转发。
+    初始化经该实例的 dumping 屏障。
+  - 转存产物（文件名/偏移等）可留在 Transferrer 实例自己的字段里——
+    实例与 `ChunkStash` 1:1；`id` / 文件名等是降级策略内部细节，非
+    分发器职责。
   - **不设 `_I.OPEN`**：抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
-- `AbstractTransferrer` 是降级家族写侧的内部抽象（实例），介质中性：
-  - `dump(chunkStash)` — 把整个 `ChunkStash` 转移到降级目标（不含
-    封存）；抽象实例成员 `_I.DUMP` 由下游实现实际转存，
-    抽象层 Promisify + 异常转义并登记 per-stash dumping Promise。
-  - `write(chunkStash, buffer)` — 活数据单块续写；先 `await` 该 stash
-    的 dumping 屏障再追加（返回 `undefined`）。
-  - `getDumping(chunkStash)` — 查询 per-stash dumping Promise。
+- `AbstractTransferrer` 是降级家族写侧的内部抽象（实例），介质中性；
+  实例由分发器在降级时构造并持有（类取自读器家族的
+  `_S.TRANSFERRER_CTOR`），与 `ChunkStash` 1:1；构造参数由策略
+  经 `$I.SET_TRANSFERRER_ARGS` 预置，分发器只存转、不解释：
+  - `$I.DUMP(chunkStash)` — 把整个 `ChunkStash` 转移到降级目标（不含
+    封存）；抽象实例成员 `_I.DUMP` 由下游实现实际转存，抽象层
+    Promisify + 异常转义并把 dumping Promise 记在本实例的字段上。
+  - `$I.WRITE(buffer)` — 活数据单块续写；先 `await` 本实例的 dumping
+    屏障再转发 `_I.WRITE(buffer)`（返回 `undefined`）。
+  - `$I.SET_DONE()` — 源已尽在降级相位的落点：agent 在 done 那趟拉取
+    同步置位（拉取串行等待 `write`，无需屏障）。
+  - 三个驱动都是受保护成员（`$I`），只给分发器与 agent；读侧公开
+    `get dumping`（读取器据此做初始化屏障）与 `get done`（降级叶子据此
+    判终态）。
+  - 状态就是实例字段（`dumping` / `done`）——1:1 之下无需再按 stash
+    键控。
 - `TemporaryFileChunkReader`（未来）是 `AbstractDegradedChunkReader` 的
   Node 文件系统读实现，配套其 `TemporaryFileTransferrer` 提供写侧；
   浏览器分支（IndexedDB / OPFS）同挂其下。

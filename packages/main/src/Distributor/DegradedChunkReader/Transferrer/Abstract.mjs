@@ -1,41 +1,41 @@
 import * as Ow from '@produck/ow';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
-import { I, _I } from './Symbol.mjs';
+import { I, $I, _I } from './Symbol.mjs';
 
 function catchDumpError(cause) {
   Ow.Error.Common('Failed to dump the ChunkStash.', { cause });
 }
 
 class AbstractTransferrer {
-  [I.DUMPING] = new WeakMap();
-  [I.DONE] = new WeakSet();
+  [I.DUMPING] = null;
+  [I.DONE] = false;
 
-  dump(chunkStash) {
+  [$I.DUMP](chunkStash) {
     const dumping = Promise.resolve()
       .then(() => this[_I.DUMP](chunkStash))
       .catch(catchDumpError);
 
-    this[I.DUMPING].set(chunkStash, dumping);
+    this[I.DUMPING] = dumping;
 
     return dumping;
   }
 
-  async write(chunkStash, buffer) {
-    await this.getDumping(chunkStash);
-    await this[_I.WRITE](chunkStash, buffer);
+  async [$I.WRITE](buffer) {
+    await this[I.DUMPING];
+    await this[_I.WRITE](buffer);
   }
 
-  setDone(chunkStash) {
-    this[I.DONE].add(chunkStash);
+  [$I.SET_DONE]() {
+    this[I.DONE] = true;
   }
 
-  getDumping(chunkStash) {
-    return this[I.DUMPING].get(chunkStash);
+  get dumping() {
+    return this[I.DUMPING];
   }
 
-  getDone(chunkStash) {
-    return this[I.DONE].has(chunkStash);
+  get done() {
+    return this[I.DONE];
   }
 }
 

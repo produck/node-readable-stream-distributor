@@ -117,6 +117,17 @@ Promise"这一事实：
 > `write` / per-stash dumping），具体 reader 经一次性静态成员
 > `transferrer` 配置其配套 Transferrer 实例。原静态 `_S.DUMP` /
 > `S.DUMPING` / `getChunkStashDumping` 相应改为 Transferrer 成员。
+>
+> 2026-09-15 修订：Transferrer 由策略级单例改为**分发器持有、降级时
+> 构造**的实例——类由降级读器家族静态给出（`_S.TRANSFERRER_CTOR`），
+> 构造参数经 `$I.SET_TRANSFERRER_ARGS(...)` 预置（分发器只存转、不解释），
+> 实例与 `ChunkStash` 1:1；原一次性静态成员 `transferrer` 的配置方式取消。
+> 与 stash 的绑定仍发生在 `dump(chunkStash)`。
+>
+> 同日续：实例 1:1 于 stash，故写侧状态退化为普通字段；三个驱动
+> `$I.DUMP(chunkStash)` / `$I.WRITE(buffer)` / `$I.SET_DONE()` 归受保护
+> （只给分发器与 agent），读侧公开 `get dumping` / `get done`；抽象侧
+> `_I.WRITE(buffer)` 不再带 stash。
 
 - **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 UUID
   作为唯一标识（构造时生成），供存储工件唯一命名。
@@ -132,33 +143,36 @@ Promise"这一事实：
   reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
   目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属降级
   策略内部细节。
+  2026-09-15：降级时另向各拷贝读器交接写侧实例（构造参数由策略经
+  `$I.SET_TRANSFERRER_ARGS` 预置，分发器只存转、不解释）。
 - **`AbstractDegradedChunkReader` 抽象中间层（纯读）**：降级读取器家族
   的统一基类。写侧不在本类（2026-09-07 迁往 Transferrer）：
   - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`（已认可：
     维持受保护、不新增符号，构造阶段与 `AbstractChunkReader` 协议
     对齐），**所有初始化过程都 await dumping**（已认可）。
-  - **一次性静态成员 `transferrer`**（2026-09-07 定稿）：具体 reader
-    类须先配置一个 `AbstractTransferrer` 实例（守卫式 setter：一次性
-    不可变 + `instanceof AbstractTransferrer`）；未配置不能 `new`。
-    实例初始化经 `I.CONSTRUCTOR.transferrer` 取 dumping 屏障。
-  - **`chunkStashDumping`**（实例 getter，2026-09-07 定稿）：返回
-    `transferrer.getDumping(本 stash)`——即 dumping 屏障，仅阻塞、
-    不提供产物。
+  - **写侧类静态声明**（2026-09-15 取代一次性静态成员 `transferrer`）：
+    具体 reader 类静态声明写侧类 `_S.TRANSFERRER_CTOR`；实例
+    由分发器在降级时构造并持有，交接给各拷贝读器（不再一次性守卫）。
+  - **`chunkStashDumping`**（实例 getter）：返回所持 transferrer 的
+    `dumping`——即 dumping 屏障，仅阻塞、不提供产物。
   - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类降级的领域术语，
     抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
 - **`AbstractTransferrer`（写侧内部抽象，2026-09-07 定稿）**：
-  - 公开实例 `dump(chunkStash)`：调用抽象 `_I.DUMP`，Promisify +
-    抽象层异常转义，登记 per-stash dumping Promise。
+  - 受保护实例 `$I.DUMP(chunkStash)`：与 stash 绑定的时刻；调用抽象
+    `_I.DUMP`，Promisify + 抽象层异常转义，把 dumping Promise 记在
+    本实例字段上。
   - 抽象实例 `_I.DUMP`（下游实现）：**靠参数拿到 `chunkStash`**，
     负责转存 ChunkStash 到降级目标（不含封存），返回 PromiseOr。
     封存（drop）由分发器在 dump 成功后执行。
-  - 公开实例 `async write(chunkStash, buffer)`：先 `await` 该 stash
-    的 dumping 屏障再经抽象 `_I.WRITE` 追加（返回 `undefined`）。
-  - 公开实例 `getDumping(chunkStash)`：查询 per-stash dumping。
-  - **Degraded 自定义资源可自备 WeakMap**（已认可，语义不变）：转存
-    产物经降级策略自备 WeakMap 传递给 reader；例如文件降级在 `DUMP`
-    时自行生成 uuid 或文件名；`id` / 文件名等是降级策略内部细节，
-    非分发器职责。
+  - 受保护实例 `$I.WRITE(buffer)`：先 `await` 本实例的 dumping 屏障
+    再经抽象 `_I.WRITE(buffer)` 追加（返回 `undefined`）。
+  - 受保护实例 `$I.SET_DONE()`：源已尽在降级相位的一次落点。
+  - 公开实例 `get dumping` / `get done`：本实例的屏障与完成标志——
+    1:1 于 stash，故为普通字段而非 WeakMap / WeakSet。
+  - **Degraded 自定义资源由策略自持**（2026-09-15 放宽）：实例与
+    stash 1:1，转存产物可留在实例自己的字段里（原为策略自备
+    WeakMap）；例如文件降级在 `DUMP` 时自行生成 uuid 或文件名；
+    `id` / 文件名等是降级策略内部细节，非分发器职责。
   - **`await dumping` 只提供阻塞，不提供产物**（已认可，语义不变）：
     时序为分发器先触发 `transferrer.dump()`，再并发 `new` reader
     实例，再并发开始初始化；初始化 `await chunkStashDumping` 自然
@@ -204,7 +218,7 @@ Promise"这一事实：
 - [x] 降级读取器在 dump 完成前读取 → 读到不完整/半截数据
       已解（框架层 2026-08-28；2026-09-07 随 Transferrer 更新）：降级
       reader 的 `_I.INITIALIZE` await 其 stash 的 dumping 屏障
-      （`chunkStashDumping` ← transferrer 的 per-stash dumping），
+      （`chunkStashDumping` ← transferrer 的 dumping），
       `read()` / `close()` await `I.INITIALIZED`，转存完成前绝不读；
       所有消费者共享同一 Promise 屏障，dump 失败统一转义并传播给所有
       （含迟到）消费者。
