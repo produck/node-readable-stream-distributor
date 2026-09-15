@@ -9,6 +9,7 @@ function catchDumpError(cause) {
 
 class AbstractTransferrer {
   [I.DUMPING] = new WeakMap();
+  [I.DONE] = new WeakSet();
 
   dump(chunkStash) {
     const dumping = Promise.resolve()
@@ -25,8 +26,16 @@ class AbstractTransferrer {
     await this[_I.WRITE](chunkStash, buffer);
   }
 
+  setDone(chunkStash) {
+    this[I.DONE].add(chunkStash);
+  }
+
   getDumping(chunkStash) {
     return this[I.DUMPING].get(chunkStash);
+  }
+
+  getDone(chunkStash) {
+    return this[I.DONE].has(chunkStash);
   }
 }
 

@@ -339,7 +339,7 @@ interface ChunkReader {
   它的结束（这就是延迟暴露）。
 - 文件路径：介质里的末尾标志 + 各自读到的位置，同理。
 - 源已尽只在 `SourceReader` 判定一次，经**落点**交接进存储层（内存相位
-  `$I.SET_DONE()`，降级相位由 transferrer 记入介质）；此后分发流只问
+  `$I.SET_DONE()`，降级相位由 transferrer 的 `setDone()`）；此后分发流只问
   存储层，不回头看源。
 
 **"触达前沿"不再由叶子表达**：`ensure()` 的契约是"返回时目标位置已可读，

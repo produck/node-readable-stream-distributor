@@ -53,8 +53,9 @@
 - `extends EventTarget`（WHATWG，不依赖 Node EventEmitter）。
 - 公开面：`fork(label = '<UNDEFINED>')` 注册消费拷贝并返回
   `ForkedReadableStream`（`label` 助记符，默认占位串 `'<UNDEFINED>'`，
-  须为 string）；`get stashByteLimit`（委托静态）；`get degraded`（代理
-  消费代理的相位事实）；`destroy()` 为 TODO。
+  须为 string）；`get stashByteLimit`（委托静态）；`get DegradedChunkReader`
+  （静态/实例同名，策略配置的降级读取器类，介质侧的 transferrer 挂在
+  它上面）；`get degraded`（代理消费代理的相位事实）；`destroy()` 为 TODO。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
   `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）· `$I.REGISTRY`（fork 集，
   `$I.PRUNE` 清理已取消 fork）。构造校验 source 为未锁定的 WHATWG ReadableStream。
@@ -170,7 +171,11 @@
   `AbstractTransferrer`：`dump(chunkStash)`（整块迁移，不含封存）、
   `async write(chunkStash, buffer)`（先等该 stash dumping 屏障再续写）、
   `getDumping(chunkStash)`；抽象实例 `_I.DUMP` / `_I.WRITE` 由下游实现；
-  per-stash dumping 收在 Transferrer 实例（WeakMap）。
+  per-stash dumping / done 收在 Transferrer 实例（WeakMap / WeakSet）。
+- 完成标志 `setDone(chunkStash)` / `getDone(chunkStash)` 与 stash 侧
+  `$I.SET_DONE()` / `done` 同形，但落点换人：降级相位的落点交接记在
+  transferrer 上（源已尽那一趟拉取由 agent 同步置位，无屏障——拉取串行
+  等待 `write`，到位时"此前每块已可读"已成立）。降级叶子据此判终态。
 - **配对**：具体 reader 类静态成员 `transferrer` 一次性配置（守卫：
   一次性 + `instanceof AbstractTransferrer`）；转存产物（文件名/偏移等）
   经降级策略自备 WeakMap 传递，属降级策略内部细节。

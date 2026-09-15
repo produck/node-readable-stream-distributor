@@ -1,5 +1,3 @@
-import * as Ow from '@produck/ow';
-
 import * as ChunkStash from './ChunkStash/index.mjs';
 import { I, $I } from './Symbol.mjs';
 
@@ -31,6 +29,10 @@ export default class SourceConsumptionAgent {
         this.pulling = this.pull().finally(() => (this.pulling = null));
       }
 
+      await this.pulling;
+    }
+
+    if (this.pulling !== null) {
       await this.pulling;
     }
   }
@@ -72,11 +74,21 @@ export default class SourceConsumptionAgent {
   }
 
   async toTransferrer(chunk, done) {
-    // TODO: record the chunk — and the end — in the switched medium. Which
-    //   transferrer instance serves this distributor is still open: the
-    //   strategy configures one on its own reader class.
-    void chunk;
-    void done;
-    Ow.Error.Common('Not implemented');
+    const { distributor } = this;
+    const chunkStash = distributor[I.CHUNK_STASH];
+    const transferrer = distributor.DegradedChunkReader.transferrer;
+
+    // TODO: this flag is process-local — a strategy that needs the end
+    //   recorded in its own medium would have to extend the transferrer
+    //   contract.
+    if (done) {
+      transferrer.setDone(chunkStash);
+
+      return;
+    }
+
+    // `write` settles only once the chunk is readable — it waits for the dump
+    //   first, which is the order this agent's watermark relies on.
+    await transferrer.write(chunkStash, chunk);
   }
 }

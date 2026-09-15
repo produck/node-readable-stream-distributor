@@ -1,9 +1,11 @@
 import { deepFreeze } from '@produck/deep-freeze-enumerable';
 
 const I_DUMPING = Symbol('.#dumping');
+const I_DONE = Symbol('.#done');
 
 export const I = deepFreeze({
   DUMPING: I_DUMPING,
+  DONE: I_DONE,
 });
 
 const _I_DUMP = Symbol('._dump()');

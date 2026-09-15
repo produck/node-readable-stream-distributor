@@ -28,6 +28,10 @@ class ReadableStreamDistributor extends EventTarget {
     return this[_S.STASH_BYTE_LIMIT]();
   }
 
+  static get DegradedChunkReader() {
+    return this[_S.DEGRADED_CHUNK_READER];
+  }
+
   constructor(source) {
     super();
 
@@ -42,6 +46,12 @@ class ReadableStreamDistributor extends EventTarget {
 
   get stashByteLimit() {
     return this[I.CONSTRUCTOR].stashByteLimit;
+  }
+
+  // The class the strategy configured for the switch; the transferrer that
+  //   writes the switched medium hangs on it.
+  get DegradedChunkReader() {
+    return this[I.CONSTRUCTOR].DegradedChunkReader;
   }
 
   get degraded() {
