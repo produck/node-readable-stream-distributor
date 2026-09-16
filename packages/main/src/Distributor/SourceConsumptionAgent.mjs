@@ -23,8 +23,9 @@ export default class SourceConsumptionAgent {
     const { distributor } = this;
     const sourceReader = distributor[I.SOURCE_READER];
 
-    // TODO: backpressure — hold off while the buffer is full and the last dump
-    //   has not settled.
+    // TODO: observation — the backlog is never capped by design (a hung
+    //   medium is weathered while memory allows), so the host needs a way to
+    //   watch its size instead of the source being throttled on it.
     while (target >= this.pulledChunkCount && !sourceReader.done) {
       if (this.pulling === null) {
         this.pulling = this.pull().finally(() => (this.pulling = null));
@@ -87,8 +88,6 @@ export default class SourceConsumptionAgent {
       return;
     }
 
-    // `write` settles only once the chunk is readable — it waits for the dump
-    //   first, which is the order this agent's watermark relies on.
     await transferrer[Transferrer.$I.WRITE](chunk);
   }
 }

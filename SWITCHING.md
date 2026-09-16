@@ -38,7 +38,7 @@
 
 ```text
 进入 switching → 暂停 source 拉取 → fs.promises.open
-  → dump Buffer[] → 算各拷贝 skip → 换读器 → 恢复拉取
+  → dump Buffer[] → 播种各拷贝位置 → 换读器 → 恢复拉取
 ```
 
 切换天然并入既有背压点（dump 未完成暂停 source.read），不是新增机制。
@@ -65,18 +65,21 @@ Promise"这一事实：
 
 ```text
 同 tick（同步）：
-  读各拷贝 consumedChunkCount → 构造降级 reader
+  $I.DUMP(stash) 一挥手（不再 await）
+    → 读各拷贝 consumedChunkCount → 构造降级 reader
     → $I.REQUEST_INITIALIZE(consumedChunkCount) → 换入 $I.CHUNK_READER
 之后（异步）：
-  init 链：await dumping 屏障 → 叶子按播种位置自定位 → 就绪
-  read()：总是 await init → 再读
+  init 链：等 dumping 落地 → open 介质 → 进度同步（逐界 _I.SEEK）
+  read()：过门（该位被接受）→ 队列命中就直接交付；
+          否则 await init 链 → I.SYNC() 补差 → 叶子按游标取数
 ```
 
-- 降级 reader 的初始化经 `I.INITIALIZED`（`_I.INITIALIZE` 返回的
-  Promise）承接；所有 `read()` / `close()` 都 await 它。
-- skip 到位在 `init` 过程中完成：降级 `$I.REQUEST_INITIALIZE(progress)`
-  先播种 `$I.CONSUMED_CHUNK_COUNT = progress`，叶子按此规定位置自实现定位
-  （经家族抽象 `_I.SEEK` 逐界寻道，或存储级 O(1) 跳转）。
+- 初始化由 `$I.REQUEST_INITIALIZE` **请求**（同一 tick 播种 + 发起链）：
+  先等 dumping 落地，再 open 介质，再进度同步；`close()` 看的就是这条链。
+- 定位是**家族**的义务：`I.LEAF_CHUNK_COUNT` 记叶子已跨过多少条记录，
+  每次把读交给叶子前 `I.SYNC()` 逐次 `_I.SEEK()` 跨边界补差（跨不动就
+  停，差值留给下一次）；队列拦下的那段不碰叶子，差值由此产生。叶子只
+  提供边界原语（跨一条、答是否跨了）与按游标取数。
 - 切换期间到达的 pull 自然 `await init` 挂着——Promise 就是调度队列，
   无需显式暂停/排队机制，`ForkedReadableStream.pull` 零切换感知。
 
@@ -91,20 +94,26 @@ Promise"这一事实：
   `close()` 归最后一个离开的拷贝（done/cancel/destroy 皆算），
   归属要在协议里定清，避免提前关闭或泄漏。
 
-### dump 期间停靠模型（已认可，2026-09-04）
+### dump 与活块的落点模型（2026-09-16 改写，取代原"停靠模型"）
 
-`await dumping` 屏障的阻塞是**局部停靠**，不是全局阻塞：
+旧模型的"停靠"来自 `await dumping` 这道**全局屏障**；现在**没有屏障**：
+降级时把 stash 的块**扇入队首**（同一批对象，只加引用），从此**可读 =
+已被接受**——在介质上，或仍在队列里：
 
-- **非全局阻塞**：transferrer 的 `dump()` 为异步转存，不采用同步写/事件循环
-  阻塞；逐块 `await` 写盘时控制权让回事件循环，不饿死其他任务。
-- **局部停靠**：只有依赖降级数据、正 `await dumping` 的 reader 续延
-  被挂起；仍在内存阶段或已追平的 fork 不受影响。
-- **量级**：`stashByteLimit` 低时转存量小、停靠可忽略；高 + 慢盘时停靠时长
-  随转存量线性放大，成为感知抖动源。
-- **深度优化方向（future work）**：让降级 reader 在 dump 追加过程中
-  增量可读——不等待"全量 dump 完成"这一单点，按各 fork 进度无缝
-  交接，仅最落后尾巴等待。代价：reader 与 writer 的位置/顺序耦合，
-  复杂度明显更高。现阶段不实现。
+- **写侧不阻塞**：`$I.WRITE` 入队即返回，`$I.DUMP` 同步返回——source
+  的拉取不因"dump 还没完"停在一趟拉取上；活块在 dump 在途时照常
+  进队列（队列无上限，积压处置归下游）。
+- **读侧只等自己那一位被接受**：`$I.WAIT_CHUNK(position)` 判的是
+  `position < 水位 + 队列`；命中队列由抽象层直接交付（叶子不参与、
+  也不 init），已落介质的才走叶子。
+- **落地即交接**：dump 成功时水位一次推满到 `stash.length`，同时**清掉
+  队首这 L 个重复副本**（两件都在唤醒门之前做完）。所以落地**不改变
+  可读性**：同一批块只是从"队列里"变成"介质上"，读者不感知。
+- **实测**：dump 30ms 在途时新建 fork，首读 **1ms**（此前 62ms）；整条
+  20 块的流只碰介质 1 次（终态那次），介质 20 块、顺序正确、无重复。
+- **剩下的等待**只有"位还没被拉进来"（等拉取）；介质的进度只决定
+  "从哪儿取"，不决定"能不能取"。失败则闩 `I.ERROR`、门以错误拒绝，
+  队首副本与 stash 都留着（现场）。
 
 ## 分发器与 ChunkReader 构造协议（已明确）
 
@@ -128,6 +137,16 @@ Promise"这一事实：
 > `$I.DUMP(chunkStash)` / `$I.WRITE(buffer)` / `$I.SET_DONE()` 归受保护
 > （只给分发器与 agent），读侧公开 `get dumping` / `get done`；抽象侧
 > `_I.WRITE(buffer)` 不再带 stash。
+>
+> 2026-09-16 修订：**dump 并入延缓写入**——`$I.DUMP` 同步返回（同步
+> 里开工）并把 stash 的块**扇入队首**，成功即自己 `DROP` 载体、清掉
+> 队首重复副本、失败保留现场；`$I.WRITE` 入队即返回，单飞 drain 按
+> FIFO 落盘（先等 dump 落地，否则会把副本再写一遍）。读侧不再认识
+> dump：旧 dumping 屏障（`chunkStashDumping`）退役，改为统一位置门
+> `$I.WAIT_CHUNK(position)`（**接受度**：在介质上或在队列里都算可读），
+> 策略 init 改惰性（首次读介质前），公开面随之去掉 `get dumping`。
+> 因此**降级改全同步**：一挥 `$I.DUMP` 即换读器，分发器不再 `await`
+> 任何东西。
 
 - **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 UUID
   作为唯一标识（构造时生成），供存储工件唯一命名。
@@ -139,7 +158,8 @@ Promise"这一事实：
   分发器调用受保护 `$I.REQUEST_INITIALIZE(progress)`（`progress` = 该
   拷贝 `consumedChunkCount`，即 skip 位置），降级在调 `_I.INITIALIZE` 前
   先播种 `$I.CONSUMED_CHUNK_COUNT = progress`。`BufferChunkReader` 直接读
-  `chunkStash`；降级时由分发器在 dump 成功后封存（`$I.DROP`）。
+  `chunkStash`；降级时 stash 由 transferrer 接管——`$I.DUMP` 成功即
+  `DROP`（失败保留现场，供调试）。
   reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
   目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属降级
   策略内部细节。
@@ -149,35 +169,35 @@ Promise"这一事实：
   的统一基类。写侧不在本类（2026-09-07 迁往 Transferrer）：
   - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`（已认可：
     维持受保护、不新增符号，构造阶段与 `AbstractChunkReader` 协议
-    对齐），**所有初始化过程都 await dumping**（已认可）。
+    对齐）。初始化不再等整份 dump（2026-09-16 改）：先过位置门，
   - **写侧类静态声明**（2026-09-15 取代一次性静态成员 `transferrer`）：
     具体 reader 类静态声明写侧类 `_S.TRANSFERRER_CTOR`；实例
     由分发器在降级时构造并持有，交接给各拷贝读器（不再一次性守卫）。
-  - **`chunkStashDumping`**（实例 getter）：返回所持 transferrer 的
-    `dumping`——即 dumping 屏障，仅阻塞、不提供产物。
+  - **位置门（2026-09-16 取代 `chunkStashDumping`）**：读路径每次
+    `$I.WAIT_CHUNK(consumedChunkCount)`；`$I.REQUEST_INITIALIZE` 也先过门
+    再跑 `_I.INITIALIZE`。公开面随之去掉 `get dumping`。
   - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类降级的领域术语，
     抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
 - **`AbstractTransferrer`（写侧内部抽象，2026-09-07 定稿）**：
-  - 受保护实例 `$I.DUMP(chunkStash)`：与 stash 绑定的时刻；调用抽象
-    `_I.DUMP`，Promisify + 抽象层异常转义，把 dumping Promise 记在
-    本实例字段上。
+  - 受保护实例 `$I.DUMP(chunkStash)`：与 stash 绑定的时刻，**同步返回**；
+    微任务里调抽象 `_I.DUMP`，成功则由**本实例** `DROP` 载体并把水位推
+    满（不再由分发器封存）；失败闩 `I.ERROR`、唤醒门、保留现场，返回的
+    Promise 以转义错误拒给分发器挂 `warn`。
   - 抽象实例 `_I.DUMP`（下游实现）：**靠参数拿到 `chunkStash`**，
     负责转存 ChunkStash 到降级目标（不含封存），返回 PromiseOr。
-    封存（drop）由分发器在 dump 成功后执行。
-  - 受保护实例 `$I.WRITE(buffer)`：先 `await` 本实例的 dumping 屏障
-    再经抽象 `_I.WRITE(buffer)` 追加（返回 `undefined`）。
+  - 受保护实例 `$I.WRITE(buffer)`：**入队即返回**（不碰介质）；抽象
+    `_I.WRITE(buffer)` 由单飞 drain 按 FIFO 调用。
   - 受保护实例 `$I.SET_DONE()`：源已尽在降级相位的一次落点。
-  - 公开实例 `get dumping` / `get done`：本实例的屏障与完成标志——
-    1:1 于 stash，故为普通字段而非 WeakMap / WeakSet。
+  - 公开实例只读：`get pendingChunkCount` / `get pendingByteLength` /
+    `get writtenChunkCount` / `get done` / `get error`（终态闩）——1:1 于
+    stash，故为普通字段而非 WeakMap / WeakSet。
   - **Degraded 自定义资源由策略自持**（2026-09-15 放宽）：实例与
     stash 1:1，转存产物可留在实例自己的字段里（原为策略自备
     WeakMap）；例如文件降级在 `DUMP` 时自行生成 uuid 或文件名；
     `id` / 文件名等是降级策略内部细节，非分发器职责。
-  - **`await dumping` 只提供阻塞，不提供产物**（已认可，语义不变）：
-    时序为分发器先触发 `transferrer.dump()`，再并发 `new` reader
-    实例，再并发开始初始化；初始化 `await chunkStashDumping` 自然
-    等待转存完成；若已完成则直接通过。产物传递走降级策略自备的
-    WeakMap，与 dumping 屏障解耦。
+  - **位置门只提供阻塞，不提供产物**（语义延续 2026-09-16）：门放行 =
+    "该位已落介质"；转存产物（文件名 / 偏移等）仍走降级策略自备字段，
+    与门解耦。分发器与读器都不接触 dump 的生命周期。
   - 【待定：`_I.DUMP` 返回的 Promise resolve 值（转存产物）的结构；
     实例侧 `_I.INITIALIZE` / `_I.READ` 具体签名】
 - **TemporaryFileChunkReader**（未来）：临时文件目录通过**配置方法 +
@@ -216,28 +236,32 @@ Promise"这一事实：
 - [x] dump 进行中，拷贝 pull 从 BufferChunkReader 读 → 半截数据
       已解：同 tick 换读器后无拷贝再碰 buffer。
 - [x] 降级读取器在 dump 完成前读取 → 读到不完整/半截数据
-      已解（框架层 2026-08-28；2026-09-07 随 Transferrer 更新）：降级
-      reader 的 `_I.INITIALIZE` await 其 stash 的 dumping 屏障
-      （`chunkStashDumping` ← transferrer 的 dumping），
-      `read()` / `close()` await `I.INITIALIZED`，转存完成前绝不读；
-      所有消费者共享同一 Promise 屏障，dump 失败统一转义并传播给所有
-      （含迟到）消费者。
+      已解（2026-09-16 换机制）：读侧不再认识 dump，改为统一位置门
+      `transferrer.$I.WAIT_CHUNK(consumedChunkCount)`——`read()` 每次
+      先过门，`$I.REQUEST_INITIALIZE` 也在策略 init 前先过门（open/seek
+      时介质必已存在）；dump / 写失败统一闩在 `I.ERROR`，门以之拒绝，
+      所有（含迟到）消费者一致。
 - [x] switching 期间新 `fork()` 的拷贝 → 拿到的 reader 指向何物？
       已解（2026-09-15）：`fork()` 取当前相位字段
       `I.CURRENT_CHUNK_READER_CTOR`（初值内存类，降级换读器的同一同步块里
       翻成策略类），降级相位当场 `$I.REQUEST_INITIALIZE(0)` 播种，故新拷贝
       从介质第 0 位起完整读。
 - [ ] 切换途中某拷贝 `cancel` / `destroy` → 未完成的 reader 怎么办？
-- [ ] **在途 `read` 仍绑旧读器**：`pull` 先取 `$I.CHUNK_READER` 再调
+- [x] **在途 `read` 仍绑旧读器**：`pull` 先取 `$I.CHUNK_READER` 再调
       `$I.READ`，而 `$I.READ` 内的 `ensure()` 期间会换读器——`this` 仍是旧
-      的内存读器；DROP 之后它再读即抛 `ChunkStash has been dropped`
-      （实测：DROP 前读旧 stash 的块正常，DROP 后抛）。可选收法：`pull`
-      在 `ensure()` 之后重取读器 / 不 DROP 而把相位事实改为 `stash.sealed` /
-      接受此窗口。
+      的内存读器；DROP 之后它再读即抛 `ChunkStash has been dropped`。
+      已解（2026-09-16）：换读器时由分发器调内存族的 `$I.HANDOVER(新读器)`
+      交接在途那一笔（位是本文件私有符号，族表与基类都不认识它）；内存
+      叶子在 `ensure()` 回来后重看一眼，已被交接就整笔转发给接替者。
+      换读器只可能发生在 `ensure()` 的拉取里，所以这一眼足够，也不再依赖
+      DROP 时序。实测三种：慢盘 30ms、同步秒落地（无 await）、以及"这次读
+      的 ensure 还要再拉六趟"，序列都严格 c1..c20（或 c11..c20）+ done。
 - [x] 慢拷贝落后：skip 位置 = 该拷贝 `consumedChunkCount`，如何保证
       切换瞬间读到的是已 dump 的边界？
       已解：skip 到位在 init 过程中，`read()` await init 后才读文件。
-- [ ] dump 期间 source 有新数据到达 → 先入 buffer 还是直接入文件？
+- [x] dump 期间 source 有新数据到达 → 先入 buffer 还是直接入文件？
+      已解（2026-09-16）：入 transferrer 的**待写队列**（无上限），dump
+      落地后由单飞 drain 按 FIFO 补齐——顺序天然正确，拉取不停顿。
 
 > 剩余未决项集中在**分发器侧调度**：切换触发与 `dump()` 调用时机、
 > 切换中 `cancel`/`destroy` 行为（`fork` 已解：按相位取读器）、在途
@@ -249,10 +273,13 @@ Promise"这一事实：
   已解方向：无需显式排队，pull 的 `read()` 天然 `await init`。
 - 读器替换的"原子性"边界：对拷贝流而言，`$I.CHUNK_READER` 一次
   替换是否足够？是否需要"先暂停、再换、再放行"？
-  已解方向：同 tick 换读器即原子，无需三拍。
+  已解方向：同 tick 换读器即原子，无需三拍；在途那一笔由内存族的交接
+  转发自愈（`$I.HANDOVER`，2026-09-16，见 §2 清单）。
 - 背压与切换的交互：切换本身是背压点，还是与既有背压点（dump
   未完成暂停 source.read）合并？
-  已解方向：合并——一套。粒度问题见 §6 阻塞点。
+  已解（2026-09-16）：**两处都不再暂停**——延缓写入把它们一并撤掉；
+  背压量纲改为队列占用（`pendingByteLength` / `pendingChunkCount`），
+  处置权归下游。见 §6。
 
 ### 4. 降级读取器接口
 
@@ -261,10 +288,10 @@ Promise"这一事实：
   由子类自建（TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。
   降级读取器继承 `AbstractDegradedChunkReader`（纯读，实现继承的
   `_I.*`）；写侧配套一个继承 `AbstractTransferrer` 的子类（`_I.DUMP` /
-  `_I.WRITE`），并经 reader 的一次性静态成员 `transferrer` 配置挂上。
+  `_I.WRITE`），写侧类经 reader 静态 `_S.TRANSFERRER_CTOR` 声明。
 - **寻道定位在叶子**（2026-09-09）：`$I.REQUEST_INITIALIZE(progress)`
   播种 `$I.CONSUMED_CHUNK_COUNT = progress`（规定位置）；降级叶子的 `_I.INITIALIZE`
-  （await dumping 屏障后）按 `consumedChunkCount` 自实现定位——经家族
+  （惰性：首次读介质前）按 `consumedChunkCount` 自实现定位——经家族
   抽象 `_I.SEEK`（只读 4B 头并前进游标、不读 body）逐界寻道，或按
   存储做 O(1) 跳转。基类不含 `_I.SEEK` / `$I.SKIP`（定位非通用驱动器）。
 - `_I.READ` 按 position 游标前进（读 body）。
@@ -280,13 +307,15 @@ Promise"这一事实：
 
 - [x] `ensure()` 的 join 收窄为只在"源已闩、落点未落地"时等待
       （2026-09-15）：绑定在**内存读器**上的读（切换前就开始的那次）
-      不再陪等一个与它无关的在途拉取；降级读器不受影响（它本来就
-      等屏障）。
-- [ ] **主要阻塞点是读侧屏障**：dump 在途时，任何降级读器的读都要
-      等 `_I.INITIALIZE`（= dumping）——实测慢盘 20ms 下，读一个早已
-      就绪的块也要 15ms。消除方向是**换读器后移到 dump 落地之后**
-      （新老 fork 都继续吃内存前缀，读侧屏障随之可撤）；前置是 `DROP`
-      时机（在途读仍绑旧读器）。
+      不再陪等一个与它无关的在途拉取。
+- [x] **写侧阻塞已消除**（2026-09-16）：延缓写入使 pull 的落点不再等
+      dump——实测慢盘 30ms 下，源在 dump 在途时即拉尽（20 块），15 块
+      积压在队列、水位仍 0；dump 落地后按序补齐。抽象层到此不再引入
+      额外阻塞。
+- [x] **读侧等待已消**（2026-09-16）：旧 dumping 屏障退役（改位置门），
+      再把 stash 扇入队列后，dump 在途新建的 fork 直接命中队列——实测
+      首读 1ms（此前 62ms），整条流 20 块只碰介质 1 次。剩下的等待只有
+      "位还没被拉进来"（等拉取），与介质进度无关。
 
 ## 已知约束（讨论前提）
 
@@ -294,4 +323,6 @@ Promise"这一事实：
   `fileHandle.read/write`），异步 I/O。
 - `ForkedReadableStream.$I.CHUNK_READER`（getter）与
   `$I.SET_DEGRADED_CHUNK_READER(reader)`（一次性换入）是换读器的契约
-  接口，切换实现将基于它。
+  接口；交接分两半：分发器调内存族自己的
+  `BufferChunkReader.$I.HANDOVER(successor)` 交出在途那一笔，再换 fork
+  的读器——两者在同一步里。

@@ -90,9 +90,9 @@ graph TD
         BROADCAST --> COPY_B["拷贝 B"]
         BROADCAST --> COPY_N["拷贝 N"]
 
-        BUFFER -- "超过阈值" --> FILE["chunk 文件<br/>[4B len][data]..."]
-        FILE -- "替换 ChunkReader<br/>skip 到位" --> COPY_A
-        FILE -- "替换 ChunkReader<br/>skip 到位" --> COPY_B
+        BUFFER -- "超过阈值" --> FILE["chunk 文件<br/>布局示例 [4B len][data]..."]
+        FILE -- "替换 ChunkReader<br/>播种位置" --> COPY_A
+        FILE -- "替换 ChunkReader<br/>播种位置" --> COPY_B
     end
 
     COPY_A --> CONSUMER_A["消费者 A"]
@@ -113,7 +113,7 @@ graph TD
 | `AbstractChunkReader`         | 拷贝侧读取抽象——持有共享 `chunkStash`；进度（`consumedChunkCount`）与前沿驱动（`$I.READ` → `_I.READ`）                                                 |
 | `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
 | `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                     |
-| `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE`，读侧 `get dumping` / `get done`                                         |
+| `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE`，读侧位置门与队列计数                                                    |
 | `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/seal/setDone/drop），读侧公开                                                              |
 | `ForkedReadableStream`        | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                 |
 | `SourceReader`                | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态、计已消费块数），不含调度                                                          |
@@ -181,13 +181,14 @@ classDiagram
     class AbstractDegradedChunkReader {
         <<abstract>>
         +closed
-        +chunkStashDumping
     }
 
     class AbstractTransferrer {
         <<abstract>>
-        +dumping
+        +writtenChunkCount
+        +pendingChunkCount
         +done
+        +error
     }
 
     class TemporaryFileChunkReader {
@@ -316,7 +317,8 @@ title Chunk 文件格式
 ## Chunk 读取器
 
 **术语**：`ChunkReader` —— 一片一片读取 chunk 的概念装置。每个拷贝
-持有独立的 `ChunkReader`，策略切换时替换读取器，提前 skip 到位；
+持有独立的 `ChunkReader`，策略切换时替换读取器并播种位置（定位
+由驱动器在读时逐界引导）；
 切换之后新建的拷贝取当前相位字段，故也是降级读器。
 
 与 `source reader`（从源流拉取的 reader）区分：`ChunkReader` 是拷贝
@@ -379,14 +381,13 @@ graph BT
 - `BufferChunkReader` 直接消费共享 `ChunkStash`（按 index 读，`done`
   由 `stash.length` 决定），是内存路径分支。
 - `AbstractDegradedChunkReader` 是降级读取器家族的抽象中间层，**纯读**：
-  - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`；初始化
-    （`_I.INITIALIZE`）`await` 该 stash 的 **dumping 屏障**
-    （`chunkStashDumping`，仅阻塞、不提供产物），`read()` / `close()`
-    await 初始化完成——转存完成前绝不读。
+  - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`；读侧**不认识
+    dump**，只认**接受度** `transferrer.$I.WAIT_CHUNK(position)`：每次
+    `read()` 先过门，队列里还在的位由抽象层直接交付；要走介质时先惰性
+    初始化——策略要 open / 定位时介质必已存在；`close()` await 它。
   - **写侧不在此类**：写侧类由家族静态 `_S.TRANSFERRER_CTOR`
     声明；分发器在降级时用它构造实例并持有，交接给本读取器。构造
     参数由策略经 `$I.SET_TRANSFERRER_ARGS` 预置、分发器原样转发。
-    初始化经该实例的 dumping 屏障。
   - 转存产物（文件名/偏移等）可留在 Transferrer 实例自己的字段里——
     实例与 `ChunkStash` 1:1；`id` / 文件名等是降级策略内部细节，非
     分发器职责。
@@ -395,18 +396,26 @@ graph BT
   实例由分发器在降级时构造并持有（类取自读器家族的
   `_S.TRANSFERRER_CTOR`），与 `ChunkStash` 1:1；构造参数由策略
   经 `$I.SET_TRANSFERRER_ARGS` 预置，分发器只存转、不解释：
-  - `$I.DUMP(chunkStash)` — 把整个 `ChunkStash` 转移到降级目标（不含
-    封存）；抽象实例成员 `_I.DUMP` 由下游实现实际转存，抽象层
-    Promisify + 异常转义并把 dumping Promise 记在本实例的字段上。
-  - `$I.WRITE(buffer)` — 活数据单块续写；先 `await` 本实例的 dumping
-    屏障再转发 `_I.WRITE(buffer)`（返回 `undefined`）。
+  - **无阻塞调度的复杂性全在此作用域**：降级时把 stash 的块**扇入队首**
+    （同一批对象，只加引用），活块续在队尾——一条 FIFO（`I.DRAIN` 单飞）
+    就是全部；外部（分发器与读器）既不 `await` dump，也不判断换读器
+    时机。
+  - `$I.DUMP(chunkStash)` — 交出整个 `ChunkStash`（不含封存），**同步
+    返回**：先把 stash 的块扇入队首，再把那一趟记进 `I.DUMPING` 并返回，
+    本体在 `$I.START_DUMPING` 里——同一步里就调抽象 `_I.DUMP` 开工，成功
+    即 `DROP` 载体、清掉队首这 L 个重复副本并把水位一次推满；失败只闩
+    `I.ERROR` 并唤醒门（保留现场不 DROP），返回的 Promise 以转义错误
+    拒给分发器挂 `warn`。
+  - `$I.WRITE(buffer)` — 活数据**入队即返回**（不碰介质）：追加待写
+    队列并确保 drain 在途；队列无上限，积压处置归下游。
   - `$I.SET_DONE()` — 源已尽在降级相位的落点：agent 在 done 那趟拉取
-    同步置位（拉取串行等待 `write`，无需屏障）。
-  - 三个驱动都是受保护成员（`$I`），只给分发器与 agent；读侧公开
-    `get dumping`（读取器据此做初始化屏障）与 `get done`（降级叶子据此
-    判终态）。
-  - 状态就是实例字段（`dumping` / `done`）——1:1 之下无需再按 stash
-    键控。
+    同步置位；同时唤醒门（"该位永不会有块"由它冻结）。
+  - 读侧原语：`$I.WAIT_CHUNK(position)`（等该位**已被接受**：在介质上
+    或在队列里；到头也算）与 `$I.PEEK_CHUNK(position)`（取队列里那一块，
+    越界/已落介质则 `undefined`）；读侧公开 `get pendingChunkCount` /
+    `get pendingByteLength`（队列占用）/ `get writtenChunkCount`（水位）/
+    `get done` / `get error`（终态闩）。
+  - 状态就是实例字段——1:1 之下无需再按 stash 键控。
 - `TemporaryFileChunkReader`（未来）是 `AbstractDegradedChunkReader` 的
   Node 文件系统读实现，配套其 `TemporaryFileTransferrer` 提供写侧；
   浏览器分支（IndexedDB / OPFS）同挂其下。
@@ -431,8 +440,9 @@ sequenceDiagram
     BUF-->>BUF: 累计超过阈值
     DIST->>FILE: 将 Buffer[] 内容写入<br/>[4B len][chunk 1]..[chunk 10]
     DIST->>A: 替换读取器: BufferChunkReader → TemporaryFileChunkReader<br/>已消费 10 个 → 不从文件回放
-    DIST->>B: 替换读取器: BufferChunkReader → TemporaryFileChunkReader<br/>只消费 2 个 → skip 前 2 个 chunk → 从 chunk 3 开始 enqueue
-    DIST->>BUF: 清空
+    DIST->>B: 替换读取器: BufferChunkReader → TemporaryFileChunkReader<br/>播种位置 2 → 读时过门取数，落介质前逐界定位
+    Note over BUF: 转存成功即 drop（transferrer 执行，不在分发器）
+    Note over B: 在途那次 read 由旧读器交接转发（$I.HANDOVER）
 
     SRC->>DIST: read() chunk 11..
     DIST->>FILE: write(chunk 11..)
@@ -444,7 +454,8 @@ sequenceDiagram
 
 分发器不感知"落盘"——写入降级存储是**降级策略**的实现细节（呼应
 BROWSER.md：分发器不 embody 文件系统概念）。分发器不维护
-`committedChunks` 之类的落盘水位。
+`committedChunks` 之类的落盘水位：水位由 transferrer 自持
+（`writtenChunkCount`），读侧经位置门取用，不回流到分发器。
 
 各层自我管理边界：
 
@@ -512,15 +523,18 @@ sequenceDiagram
 可，不参与 source 推进节奏。source 的速率由整体消费节奏决定，不由分发器
 预设。
 
-背压点只有一个：`ChunkStash` 超过 `stashByteLimit` 且上一次 dump 尚未
-完成时，暂停 `source.read()`，dump 完成后恢复。即**磁盘写入带宽决定速率**。
+背压点：降级后不再有"等 dump 完成"这一档。`$I.WRITE` 入队即返回、
+`$I.DUMP` 同步返回，pull 的落点不再阻塞；落点从"内存 stash"变为
+"transferrer 的 FIFO 管道"（唯一写入者 = 单飞 drain）。于是背压量纲
+变成**队列占用**（`pendingChunkCount` / `pendingByteLength`）——抽象层
+只提供计数，积压怎么处置（暂停拉取、告警、丢弃）是下游的实现问题。
 
-这一背压是**拉取粒度**的：dump 在途时那一趟拉取的落点（`$I.WRITE`）
-被屏障挡住，于是该趟拉取串行化。但消费者感知到的更粗的一层是**读侧
-屏障**——降级读器诞生后先 `await` dumping 才读，所以慢盘下连"读一个
-早已就绪的块"也要等（实测 20ms 的 dump → 15ms）。`ensure()` 的 join 已
-收窄为只在"源已闩、落点未落地"时等待（2026-09-15），只覆盖绑定在内存
-读器上的等待者；消除读侧屏障需换读器后移，见 `SWITCHING.md` §6。
+读侧只等**自己的位被接受**（在介质上或在队列里）：队列本身就是内存
+缓冲，所以 dump 在途期间照样能读（实测首读 1ms，整条 20 块的流只碰
+介质 1 次）。剩下的等待只有"位还没拉进来"，与介质进度无关；介质的
+进度只决定"从哪儿取"。`ensure()` 的 join 收窄为只在"源已闩、落点未
+落地"时等待（2026-09-15）。见
+`SWITCHING.md` §6。
 
 这与传统"木桶效应"（最慢消费者决定整体速率）不同——两级存储
 （内存→磁盘）切断了快慢消费者之间的耦合。快拷贝驱动 source

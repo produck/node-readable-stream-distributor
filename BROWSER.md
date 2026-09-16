@@ -25,12 +25,14 @@ The `ChunkReader` hierarchy already reflects this split:
 - `AbstractDegradedChunkReader` is the degradation branch's reader and its
   instances only read. The write side lives on a paired internal abstract
   `AbstractTransferrer`: concrete backends implement a `Transferrer`
-  subclass (`_I.DUMP` transfers the whole stash into the degraded target;
-  the distributor seals the stash (drop) after the dump completes; `_I.WRITE` appends live chunks) and hang its configured
-  instance on the concrete reader's one-time static `transferrer`. The
-  transferrer records a per-stash dumping Promise; reader instances await
-  it during init via the `chunkStashDumping` getter, so reads never see a
-  half-dumped target.
+  subclass (`_I.DUMP` transfers the whole stash into the degraded target
+  and drops it on success; `_I.WRITE` appends live chunks) and declare its
+  class on the concrete reader's static `_S.TRANSFERRER_CTOR`. The
+  transferrer owns all non-blocking scheduling: the stash's chunks are
+  fanned into the same FIFO as the live ones, a chunk counts as readable
+  once it is accepted - on the medium or still queued - and readers only
+  wait for their own position (`$I.WAIT_CHUNK`), so reads never see a
+  half-dumped target and never wait for the bulk transfer to finish.
 
 The current shape already fits: `stashByteLimit` is the knob the distributor
 asks downstream for; the degradation backend is delivered as a reader +

@@ -4,7 +4,7 @@ import * as Ow from '@produck/ow';
 import { ThrowTypeError } from '@produck/type-error';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
-import { BufferChunkReader } from './BufferChunkReader.mjs';
+import * as BufferChunkReader from './BufferChunkReader/index.mjs';
 import * as DegradedChunkReader from './DegradedChunkReader/index.mjs';
 import * as Event from './Event.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
@@ -19,7 +19,7 @@ const { Transferrer } = DegradedChunkReader;
 
 class ReadableStreamDistributor extends EventTarget {
   [I.CHUNK_STASH] = new ChunkStash.Concrete();
-  [I.CURRENT_CHUNK_READER_CTOR] = BufferChunkReader;
+  [I.CURRENT_CHUNK_READER_CTOR] = BufferChunkReader.Concrete;
   [I.DESTROYED] = false;
   [I.TRANSFERRER_ARGS] = [];
   [$I.TRANSFERRER] = null;
@@ -109,7 +109,7 @@ class ReadableStreamDistributor extends EventTarget {
     return DegradedChunkReaderImpl[DegradedChunkReader._S.TRANSFERRER_CTOR];
   }
 
-  async [$I.DEGRADE]() {
+  [$I.DEGRADE]() {
     const {
       [I.DEGRADED_CHUNK_READER_CTOR]: DegradedChunkReaderImpl,
       [I.TRANSFERRER_CTOR]: TransferrerImpl,
@@ -118,7 +118,10 @@ class ReadableStreamDistributor extends EventTarget {
     const agent = this[I.SOURCE_CONSUMPTION_AGENT];
     const stash = this[I.CHUNK_STASH];
     const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
-    const dumping = transferrer[Transferrer.$I.DUMP](stash);
+
+    transferrer[Transferrer.$I.DUMP](stash).catch((cause) => {
+      this.dispatchEvent(new Event.Warn('dump-failed', cause));
+    });
 
     this[$I.TRANSFERRER] = transferrer;
     this[I.CURRENT_CHUNK_READER_CTOR] = DegradedChunkReaderImpl;
@@ -129,18 +132,9 @@ class ReadableStreamDistributor extends EventTarget {
       const progress = bufferChunkReader.consumedChunkCount;
 
       reader[DegradedChunkReader.$I.REQUEST_INITIALIZE](progress);
+      bufferChunkReader[BufferChunkReader.$I.HANDOVER](reader);
       forked[ForkedReadableStream.$I.SET_DEGRADED_CHUNK_READER](reader);
     }
-
-    try {
-      await dumping;
-    } catch (cause) {
-      this.dispatchEvent(new Event.Warn('dump-failed', cause));
-
-      return;
-    }
-
-    stash[ChunkStash.$I.DROP]();
   }
 
   destroy() {
