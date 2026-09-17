@@ -185,10 +185,7 @@ classDiagram
 
     class AbstractTransferrer {
         <<abstract>>
-        +writtenChunkCount
-        +pendingChunkCount
-        +done
-        +error
+        +dumping
     }
 
     class TemporaryFileChunkReader {
@@ -338,7 +335,7 @@ interface ChunkReader {
 `read()` 返回的 `{ value, done }` 是读结果（IteratorResult 形状）：
 `done: true` 时 `value` 必为 `undefined`——终止读天生不是一条数据。
 
-**`done` 由叶子按"存储层自身的终结事实 + 该拷贝自己的位置"判定**：
+**`done` 由介质侧按"存储层自身的终结事实 + 该拷贝自己的位置"判定**：
 
 - 内存路径：`stash.done && index >= stash.length`——`stash.done` 是内容
   终结，`index >= length` 是这一拷贝自己的 backlog 闸，两者合起来才是
@@ -348,17 +345,17 @@ interface ChunkReader {
   `$I.SET_DONE()`，降级相位由 transferrer 的 `setDone()`）；此后分发流只问
   存储层，不回头看源。
 
-**"触达前沿"不再由叶子表达**：`ensure()` 的契约是"返回时目标位置已可读，
-或存储层已终结"，所以叶子被调用时取不到货只可能是契约违规（实现侧按
+**"触达前沿"不再由介质侧表达**：`ensure()` 的契约是"返回时目标位置已可读，
+或存储层已终结"，所以介质侧被调用时取不到货只可能是契约违规（实现侧按
 断言处理），不是一种要往下传的状态。
 
 驱动作用域固定在基类的受保护 `$I.READ`（每拷贝的驱动入口，包内唯一
 调用者是 `ForkedReadableStream.pull`）：
 
-- **推进**：它 `await ensure(CONSUMED_CHUNK_COUNT)` → `await _I.READ()`；叶子报非终态
-  才 `CONSUMED_CHUNK_COUNT++`，再原样返回叶子的读结果。因此前进点全包只有一处，
+- **推进**：它 `await ensure(CONSUMED_CHUNK_COUNT)` → `await _I.READ()`；介质侧报非终态
+  才 `CONSUMED_CHUNK_COUNT++`，再原样返回介质侧的读结果。因此前进点全包只有一处，
   且只在真的交出内容时前进——它总是"下一个要取的位置"。
-- **不解释 `done`**：`done` 的含义与判定都归叶子，它只借这个标志决定是否推进，
+- **不解释 `done`**：`done` 的含义与判定都归介质侧，它只借这个标志决定是否推进，
   并原样转发结果的形状。
 - 降级家族**不覆写** `$I.READ`、也不走 `super`，只在 `_I.READ` 里
   `await` 初始化后转发自家 `_I.READ`；基类驱动对它们天然成立。
@@ -396,25 +393,24 @@ graph BT
   实例由分发器在降级时构造并持有（类取自读器家族的
   `_S.TRANSFERRER_CTOR`），与 `ChunkStash` 1:1；构造参数由策略
   经 `$I.SET_TRANSFERRER_ARGS` 预置，分发器只存转、不解释：
-  - **无阻塞调度的复杂性全在此作用域**：降级时把 stash 的块**扇入队首**
-    （同一批对象，只加引用），活块续在队尾——一条 FIFO（`I.DRAIN` 单飞）
-    就是全部；外部（分发器与读器）既不 `await` dump，也不判断换读器
-    时机。
+  - **无阻塞调度的复杂性全在此作用域**：降级时**接管** stash 的整份
+    块列表（同一批对象，只加引用），活块续在队尾——一条 FIFO
+    （`I.DRAIN` 单飞）就是全部；外部（分发器与读器）既不 `await` dump，
+    也不判断换读器时机。
   - `$I.DUMP(chunkStash)` — 交出整个 `ChunkStash`（不含封存），**同步
-    返回**：先把 stash 的块扇入队首，再把那一趟记进 `I.DUMPING` 并返回，
-    本体在 `$I.START_DUMPING` 里——同一步里就调抽象 `_I.DUMP` 开工，成功
-    即 `DROP` 载体、清掉队首这 L 个重复副本并把水位一次推满；失败只闩
-    `I.ERROR` 并唤醒门（保留现场不 DROP），返回的 Promise 以转义错误
-    拒给分发器挂 `warn`。
+    返回**：先接管 stash 的整份块列表（此刻队列必空），再把那一趟记进
+    `I.DUMPING` 并返回，本体在 `$I.START_DUMPING` 里——同一步里就调抽象
+    `_I.DUMP` 开工，成功即 `DROP` 载体、清掉接管的这 L 条（已落盘）并把
+    水位一次推满；失败只闩 `I.ERROR` 并结算门（保留现场不 DROP），返回的
+    Promise 以转义错误拒给分发器挂 `warn`。
   - `$I.WRITE(buffer)` — 活数据**入队即返回**（不碰介质）：追加待写
     队列并确保 drain 在途；队列无上限，积压处置归下游。
   - `$I.SET_DONE()` — 源已尽在降级相位的落点：agent 在 done 那趟拉取
-    同步置位；同时唤醒门（"该位永不会有块"由它冻结）。
+    同步置位；同时结算门（"该位永不会有块"由它冻结）。
   - 读侧原语：`$I.WAIT_CHUNK(position)`（等该位**已被接受**：在介质上
-    或在队列里；到头也算）与 `$I.PEEK_CHUNK(position)`（取队列里那一块，
-    越界/已落介质则 `undefined`）；读侧公开 `get pendingChunkCount` /
-    `get pendingByteLength`（队列占用）/ `get writtenChunkCount`（水位）/
-    `get done` / `get error`（终态闩）。
+    或在队列里；到头也算）与 `$I.PEEK(position)`（取队列里那一块，
+    越界/已落介质则 `undefined`）。实例是纯内部对象：不开公开观察面
+    （调试看符号表），家族只经 `get dumping` 与 `$I` 原语交互。
   - 状态就是实例字段——1:1 之下无需再按 stash 键控。
 - `TemporaryFileChunkReader`（未来）是 `AbstractDegradedChunkReader` 的
   Node 文件系统读实现，配套其 `TemporaryFileTransferrer` 提供写侧；
@@ -526,8 +522,8 @@ sequenceDiagram
 背压点：降级后不再有"等 dump 完成"这一档。`$I.WRITE` 入队即返回、
 `$I.DUMP` 同步返回，pull 的落点不再阻塞；落点从"内存 stash"变为
 "transferrer 的 FIFO 管道"（唯一写入者 = 单飞 drain）。于是背压量纲
-变成**队列占用**（`pendingChunkCount` / `pendingByteLength`）——抽象层
-只提供计数，积压怎么处置（暂停拉取、告警、丢弃）是下游的实现问题。
+变成**队列占用**——抽象层不设上限、不做闸门，也不外露观察面
+（调试看符号），积压怎么处置是下游的实现问题。
 
 读侧只等**自己的位被接受**（在介质上或在队列里）：队列本身就是内存
 缓冲，所以 dump 在途期间照样能读（实测首读 1ms，整条 20 块的流只碰

@@ -1,3 +1,5 @@
+// TODO: remove at repo wrap-up — a platform-neutral base must not import
+//   node:path; this validator belongs to a Node-specific module.
 import * as path from 'node:path';
 
 import { ThrowTypeError } from '@produck/type-error';

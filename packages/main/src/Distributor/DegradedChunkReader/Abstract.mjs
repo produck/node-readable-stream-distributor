@@ -7,12 +7,11 @@ import { I, $I, _I, _S } from './Symbol.mjs';
 class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   [I.CLOSED] = false;
   [I.INITIALIZED];
-  [I.LEAF_CHUNK_COUNT] = 0;
+  [I.SEEKED_CHUNK_COUNT] = 0;
   [I.ERROR] = null;
 
   constructor(sourceConsumptionAgent, chunkStash, transferrer) {
     super(sourceConsumptionAgent, chunkStash);
-
     this[$I.TRANSFERRER] = transferrer;
   }
 
@@ -29,7 +28,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     const transferrer = this[$I.TRANSFERRER];
 
     try {
-      await transferrer[Transferrer.$I.WAIT_DUMPING]();
+      await transferrer.dumping;
       await this[_I.INITIALIZE]();
       await this[I.SYNC]();
     } catch (cause) {
@@ -39,15 +38,17 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
 
   async [I.SYNC]() {
     const target = this[ChunkReader.$I.CONSUMED_CHUNK_COUNT];
-    let index = this[I.LEAF_CHUNK_COUNT];
+    let count = this[I.SEEKED_CHUNK_COUNT];
 
-    for (; index < target; index += 1) {
+    while (count < target) {
       if (!(await this[_I.SEEK]())) {
         break;
       }
+
+      count++;
     }
 
-    this[I.LEAF_CHUNK_COUNT] = index;
+    this[I.SEEKED_CHUNK_COUNT] = count;
   }
 
   async [$I.CLOSE]() {
@@ -66,12 +67,16 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
 
     await transferrer[Transferrer.$I.WAIT_CHUNK](position);
 
-    const pending = transferrer[Transferrer.$I.PEEK_CHUNK](position);
+    const chunk = transferrer[Transferrer.$I.PEEK](position);
 
-    if (pending !== undefined) {
-      return { done: false, value: pending };
+    if (chunk !== undefined) {
+      return { done: false, value: chunk };
     }
 
+    return this[I.READ_BACK]();
+  }
+
+  async [I.READ_BACK]() {
     await this[I.INITIALIZED];
 
     if (this[I.ERROR] !== null) {
@@ -83,14 +88,13 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     const result = await this[_I.READ]();
 
     if (!result.done) {
-      this[I.LEAF_CHUNK_COUNT] += 1;
+      this[I.SEEKED_CHUNK_COUNT]++;
     }
 
-    //TODO type checking
     return result;
   }
 
-  [_I.INITIALIZE]() {}
+  async [_I.INITIALIZE]() {}
 }
 
 export default Abstract(
@@ -99,8 +103,8 @@ export default Abstract(
     // Contract: `_I.SEEK` crosses one record boundary without reading a body,
     //   answering `false` when the medium has no record left to cross; the
     //   driver drives it until that answer. `_I.READ` then serves the record
-    //   the leaf's cursor stands on.
-    [_I.READ]: M.Method().returns(M.OrPromiseLike()),
+    //   the medium-side cursor stands on — that step is the read-back.
+    [_I.READ]: M.Method().returns(M.OrPromiseLike(/* { done, value } */)),
     [_I.INITIALIZE]: M.Method().returns(M.OrPromiseLike(M.Undefined)),
     [_I.CLOSE]: M.Method().returns(M.OrPromiseLike(M.Undefined)),
     [_I.SEEK]: M.Method().returns(M.OrPromiseLike(M.Boolean)),

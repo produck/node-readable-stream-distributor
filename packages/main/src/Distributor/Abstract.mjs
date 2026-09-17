@@ -1,3 +1,5 @@
+// TODO: remove at repo wrap-up — a platform-neutral base must not import
+//   node:os; the default limit belongs to a Node-specific subclass.
 import * as os from 'node:os';
 
 import * as Ow from '@produck/ow';

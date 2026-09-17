@@ -71,15 +71,15 @@ Promise"这一事实：
 之后（异步）：
   init 链：等 dumping 落地 → open 介质 → 进度同步（逐界 _I.SEEK）
   read()：过门（该位被接受）→ 队列命中就直接交付；
-          否则 await init 链 → I.SYNC() 补差 → 叶子按游标取数
+          否则 await init 链 → I.SYNC() 补差 → 介质侧读回（按游标取数）
 ```
 
 - 初始化由 `$I.REQUEST_INITIALIZE` **请求**（同一 tick 播种 + 发起链）：
   先等 dumping 落地，再 open 介质，再进度同步；`close()` 看的就是这条链。
-- 定位是**家族**的义务：`I.LEAF_CHUNK_COUNT` 记叶子已跨过多少条记录，
-  每次把读交给叶子前 `I.SYNC()` 逐次 `_I.SEEK()` 跨边界补差（跨不动就
-  停，差值留给下一次）；队列拦下的那段不碰叶子，差值由此产生。叶子只
-  提供边界原语（跨一条、答是否跨了）与按游标取数。
+- 定位是**家族**的义务：`I.SEEKED_CHUNK_COUNT` 记游标已寻道跨过多少条记录，
+  每次把读交给介质侧前 `I.SYNC()` 逐次 `_I.SEEK()` 跨边界补差（跨不动就
+  停，差值留给下一次）；队列拦下的那段不碰介质侧，差值由此产生。介质侧只
+  提供边界原语（跨一条、答是否跨了）与读回（按游标取数）。
 - 切换期间到达的 pull 自然 `await init` 挂着——Promise 就是调度队列，
   无需显式暂停/排队机制，`ForkedReadableStream.pull` 零切换感知。
 
@@ -97,23 +97,23 @@ Promise"这一事实：
 ### dump 与活块的落点模型（2026-09-16 改写，取代原"停靠模型"）
 
 旧模型的"停靠"来自 `await dumping` 这道**全局屏障**；现在**没有屏障**：
-降级时把 stash 的块**扇入队首**（同一批对象，只加引用），从此**可读 =
+降级时**接管** stash 的整份块列表（同一批对象，只加引用），从此**可读 =
 已被接受**——在介质上，或仍在队列里：
 
 - **写侧不阻塞**：`$I.WRITE` 入队即返回，`$I.DUMP` 同步返回——source
   的拉取不因"dump 还没完"停在一趟拉取上；活块在 dump 在途时照常
   进队列（队列无上限，积压处置归下游）。
 - **读侧只等自己那一位被接受**：`$I.WAIT_CHUNK(position)` 判的是
-  `position < 水位 + 队列`；命中队列由抽象层直接交付（叶子不参与、
-  也不 init），已落介质的才走叶子。
+  `position < 水位 + 队列`；命中队列由抽象层直接交付（介质侧不参与、
+  也不 init），已落介质的才走介质侧。
 - **落地即交接**：dump 成功时水位一次推满到 `stash.length`，同时**清掉
-  队首这 L 个重复副本**（两件都在唤醒门之前做完）。所以落地**不改变
-  可读性**：同一批块只是从"队列里"变成"介质上"，读者不感知。
+  接管的这 L 条**（它们已落盘；两件都在结算门之前做完）。所以落地
+  **不改变可读性**：同一批块只是从"队列里"变成"介质上"，读者不感知。
 - **实测**：dump 30ms 在途时新建 fork，首读 **1ms**（此前 62ms）；整条
   20 块的流只碰介质 1 次（终态那次），介质 20 块、顺序正确、无重复。
 - **剩下的等待**只有"位还没被拉进来"（等拉取）；介质的进度只决定
   "从哪儿取"，不决定"能不能取"。失败则闩 `I.ERROR`、门以错误拒绝，
-  队首副本与 stash 都留着（现场）。
+  接管的块与 stash 都留着（现场）。
 
 ## 分发器与 ChunkReader 构造协议（已明确）
 
@@ -139,14 +139,20 @@ Promise"这一事实：
 > `_I.WRITE(buffer)` 不再带 stash。
 >
 > 2026-09-16 修订：**dump 并入延缓写入**——`$I.DUMP` 同步返回（同步
-> 里开工）并把 stash 的块**扇入队首**，成功即自己 `DROP` 载体、清掉
-> 队首重复副本、失败保留现场；`$I.WRITE` 入队即返回，单飞 drain 按
+> 里开工）并把 stash 的整份块列表**接管**过来（此刻队列必空），成功即
+> 自己 `DROP` 载体、清掉那 L 条、失败保留现场；`$I.WRITE` 入队即返回，单飞 drain 按
 > FIFO 落盘（先等 dump 落地，否则会把副本再写一遍）。读侧不再认识
 > dump：旧 dumping 屏障（`chunkStashDumping`）退役，改为统一位置门
 > `$I.WAIT_CHUNK(position)`（**接受度**：在介质上或在队列里都算可读），
 > 策略 init 改惰性（首次读介质前），公开面随之去掉 `get dumping`。
 > 因此**降级改全同步**：一挥 `$I.DUMP` 即换读器，分发器不再 `await`
 > 任何东西。
+>
+> 同日再续：策略 init 不再是惰性——`$I.REQUEST_INITIALIZE` 同步播种
+> 并发起链（等 dumping 落地 → open → 进度同步），定位归家族
+> （`I.SEEKED_CHUNK_COUNT` 记游标已寻道跨过的块数，`I.SYNC()` 逐界 `_I.SEEK`，
+> 落介质前补差），`get dumping` 加回公开面，初始化链直接 `await dumping`
+> （不再另有受保护入口）。
 
 - **分发器 `id`**：每个分发器对应一个 SourceStream，持有一个 UUID
   作为唯一标识（构造时生成），供存储工件唯一命名。
@@ -174,22 +180,23 @@ Promise"这一事实：
     具体 reader 类静态声明写侧类 `_S.TRANSFERRER_CTOR`；实例
     由分发器在降级时构造并持有，交接给各拷贝读器（不再一次性守卫）。
   - **位置门（2026-09-16 取代 `chunkStashDumping`）**：读路径每次
-    `$I.WAIT_CHUNK(consumedChunkCount)`；`$I.REQUEST_INITIALIZE` 也先过门
-    再跑 `_I.INITIALIZE`。公开面随之去掉 `get dumping`。
+    `$I.WAIT_CHUNK(consumedChunkCount)`；初始化链先 `await dumping`
+    （整份转移落地）再跑 `_I.INITIALIZE`。`get dumping` 是公开观察面，
+    可读性不依赖它。
   - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类降级的领域术语，
     抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
 - **`AbstractTransferrer`（写侧内部抽象，2026-09-07 定稿）**：
   - 受保护实例 `$I.DUMP(chunkStash)`：与 stash 绑定的时刻，**同步返回**；
     微任务里调抽象 `_I.DUMP`，成功则由**本实例** `DROP` 载体并把水位推
-    满（不再由分发器封存）；失败闩 `I.ERROR`、唤醒门、保留现场，返回的
+    满（不再由分发器封存）；失败闩 `I.ERROR`、结算门、保留现场，返回的
     Promise 以转义错误拒给分发器挂 `warn`。
   - 抽象实例 `_I.DUMP`（下游实现）：**靠参数拿到 `chunkStash`**，
     负责转存 ChunkStash 到降级目标（不含封存），返回 PromiseOr。
   - 受保护实例 `$I.WRITE(buffer)`：**入队即返回**（不碰介质）；抽象
     `_I.WRITE(buffer)` 由单飞 drain 按 FIFO 调用。
   - 受保护实例 `$I.SET_DONE()`：源已尽在降级相位的一次落点。
-  - 公开实例只读：`get pendingChunkCount` / `get pendingByteLength` /
-    `get writtenChunkCount` / `get done` / `get error`（终态闩）——1:1 于
+  - 实例为纯内部对象：不开公开观察面（调试看符号）；家族只经
+    `get dumping` 与 `$I` 原语交互——1:1 于
     stash，故为普通字段而非 WeakMap / WeakSet。
   - **Degraded 自定义资源由策略自持**（2026-09-15 放宽）：实例与
     stash 1:1，转存产物可留在实例自己的字段里（原为策略自备
@@ -252,7 +259,7 @@ Promise"这一事实：
       的内存读器；DROP 之后它再读即抛 `ChunkStash has been dropped`。
       已解（2026-09-16）：换读器时由分发器调内存族的 `$I.HANDOVER(新读器)`
       交接在途那一笔（位是本文件私有符号，族表与基类都不认识它）；内存
-      叶子在 `ensure()` 回来后重看一眼，已被交接就整笔转发给接替者。
+      介质侧在 `ensure()` 回来后重看一眼，已被交接就整笔转发给接替者。
       换读器只可能发生在 `ensure()` 的拉取里，所以这一眼足够，也不再依赖
       DROP 时序。实测三种：慢盘 30ms、同步秒落地（无 await）、以及"这次读
       的 ensure 还要再拉六趟"，序列都严格 c1..c20（或 c11..c20）+ done。
@@ -278,7 +285,7 @@ Promise"这一事实：
 - 背压与切换的交互：切换本身是背压点，还是与既有背压点（dump
   未完成暂停 source.read）合并？
   已解（2026-09-16）：**两处都不再暂停**——延缓写入把它们一并撤掉；
-  背压量纲改为队列占用（`pendingByteLength` / `pendingChunkCount`），
+  积压不设上限、不做闸门，也不外露观察面（调试看符号），
   处置权归下游。见 §6。
 
 ### 4. 降级读取器接口
@@ -289,8 +296,8 @@ Promise"这一事实：
   降级读取器继承 `AbstractDegradedChunkReader`（纯读，实现继承的
   `_I.*`）；写侧配套一个继承 `AbstractTransferrer` 的子类（`_I.DUMP` /
   `_I.WRITE`），写侧类经 reader 静态 `_S.TRANSFERRER_CTOR` 声明。
-- **寻道定位在叶子**（2026-09-09）：`$I.REQUEST_INITIALIZE(progress)`
-  播种 `$I.CONSUMED_CHUNK_COUNT = progress`（规定位置）；降级叶子的 `_I.INITIALIZE`
+- **寻道定位在介质侧**（2026-09-09）：`$I.REQUEST_INITIALIZE(progress)`
+  播种 `$I.CONSUMED_CHUNK_COUNT = progress`（规定位置）；降级介质侧实现的 `_I.INITIALIZE`
   （惰性：首次读介质前）按 `consumedChunkCount` 自实现定位——经家族
   抽象 `_I.SEEK`（只读 4B 头并前进游标、不读 body）逐界寻道，或按
   存储做 O(1) 跳转。基类不含 `_I.SEEK` / `$I.SKIP`（定位非通用驱动器）。
@@ -313,7 +320,7 @@ Promise"这一事实：
       积压在队列、水位仍 0；dump 落地后按序补齐。抽象层到此不再引入
       额外阻塞。
 - [x] **读侧等待已消**（2026-09-16）：旧 dumping 屏障退役（改位置门），
-      再把 stash 扇入队列后，dump 在途新建的 fork 直接命中队列——实测
+      再把 stash 的块接管进队列后，dump 在途新建的 fork 直接命中队列——实测
       首读 1ms（此前 62ms），整条流 20 块只碰介质 1 次。剩下的等待只有
       "位还没被拉进来"（等拉取），与介质进度无关。
 

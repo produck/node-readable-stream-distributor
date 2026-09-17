@@ -3,17 +3,19 @@ import { deepFreeze } from '@produck/deep-freeze-enumerable';
 const I_INITIALIZED = Symbol('.#initialized');
 const I_CLOSED = Symbol('.#closed');
 const I_ERROR = Symbol('.#error');
-const I_LEAF_CHUNK_COUNT = Symbol('.#leafChunkCount');
+const I_SEEKED_CHUNK_COUNT = Symbol('.#seekedChunkCount');
 const I_INITIALIZE = Symbol('.#initialize()');
 const I_SYNC = Symbol('.#sync()');
+const I_READ_BACK = Symbol('.#readBack()');
 
 export const I = deepFreeze({
   INITIALIZED: I_INITIALIZED,
   CLOSED: I_CLOSED,
   ERROR: I_ERROR,
-  LEAF_CHUNK_COUNT: I_LEAF_CHUNK_COUNT,
+  SEEKED_CHUNK_COUNT: I_SEEKED_CHUNK_COUNT,
   INITIALIZE: I_INITIALIZE,
   SYNC: I_SYNC,
+  READ_BACK: I_READ_BACK,
 });
 
 const $I_TRANSFERRER = Symbol('.$transferrer');

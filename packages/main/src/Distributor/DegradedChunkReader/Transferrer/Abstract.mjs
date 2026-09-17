@@ -4,33 +4,43 @@ import Abstract, { Member as M } from '@produck/es-abstract';
 import * as ChunkStash from '../../ChunkStash/index.mjs';
 import { I, $I, _I } from './Symbol.mjs';
 
+const noop = () => {};
+
 class AbstractTransferrer {
   [I.PENDING_CHUNKS] = [];
-  [I.PENDING_BYTE_LENGTH] = 0;
   [I.WRITTEN_CHUNK_COUNT] = 0;
-  [I.PROGRESS] = Promise.withResolvers();
+  [I.WAITERS] = new Set();
   [I.DRAINING] = null;
   [I.DUMPING] = null;
   [I.ERROR] = null;
   [I.DONE] = false;
 
-  [I.ADVANCE](writtenChunkCount) {
-    this[I.WRITTEN_CHUNK_COUNT] = writtenChunkCount;
+  [I.SETTLE]() {
+    const waiters = this[I.WAITERS];
 
-    const { resolve } = this[I.PROGRESS];
+    if (waiters.size === 0) {
+      return;
+    }
 
-    this[I.PROGRESS] = Promise.withResolvers();
-    resolve();
+    const total = this[I.WRITTEN_CHUNK_COUNT] + this[I.PENDING_CHUNKS].length;
+    const open = this[I.DONE] || this[I.ERROR] !== null;
+
+    for (const waiter of waiters) {
+      if (waiter.position < total || open) {
+        waiters.delete(waiter);
+        waiter.resolve();
+      }
+    }
   }
 
   [I.FAIL](cause) {
     this[I.ERROR] = cause;
-    this[I.ADVANCE](this[I.WRITTEN_CHUNK_COUNT]);
+    this[I.SETTLE]();
   }
 
   async [I.DRAIN]() {
     if (this[I.DUMPING] !== null) {
-      await this[I.DUMPING].catch(() => {});
+      await this[I.DUMPING].catch(noop);
     }
 
     if (this[I.ERROR] !== null) {
@@ -43,100 +53,76 @@ class AbstractTransferrer {
       await this[_I.WRITE](buffer).catch((cause) => this[I.FAIL](cause));
 
       if (this[I.ERROR] !== null) {
-        return;
+        break;
       }
 
       this[I.PENDING_CHUNKS].shift();
-      this[I.PENDING_BYTE_LENGTH] -= buffer.byteLength;
-      this[I.ADVANCE](this[I.WRITTEN_CHUNK_COUNT] + 1);
+      this[I.WRITTEN_CHUNK_COUNT] += 1;
     }
+
+    this[I.DRAINING] = null;
   }
 
   async [$I.START_DUMPING](chunkStash) {
-    const { length, byteLength } = chunkStash;
+    this[I.PENDING_CHUNKS] = [...chunkStash.chunks()];
+
+    const { length } = chunkStash;
 
     try {
       await this[_I.DUMP](chunkStash);
       chunkStash[ChunkStash.$I.DROP]();
       this[I.PENDING_CHUNKS].splice(0, length);
-      this[I.PENDING_BYTE_LENGTH] -= byteLength;
-      this[I.ADVANCE](length);
+      this[I.WRITTEN_CHUNK_COUNT] = length;
+      this[I.SETTLE]();
     } catch (cause) {
       this[I.FAIL](cause);
-      // TODO: decide whether the queued scene (the fanned-in head plus the
-      //   backlog) stays unreadable after a failed dump, as it is now, or is
-      //   still handed out while the medium is dead.
+      // TODO: decide whether the taken-over list stays unreadable after a
+      //   failed dump, as it is now, or is still handed out while the medium
+      //   is dead.
       Ow.Error.Common('Failed to dump the ChunkStash.', { cause });
     }
   }
 
   [$I.DUMP](chunkStash) {
-    this[I.PENDING_CHUNKS] = [
-      ...chunkStash.chunks(),
-      ...this[I.PENDING_CHUNKS],
-    ];
-    this[I.PENDING_BYTE_LENGTH] += chunkStash.byteLength;
-
     return (this[I.DUMPING] = this[$I.START_DUMPING](chunkStash));
   }
 
-  [$I.WRITE](buffer) {
+  [$I.WRITE](chunk) {
     if (this[I.ERROR] !== null) {
-      throw this[I.ERROR];
+      Ow.throw(this[I.ERROR]);
     }
 
-    this[I.PENDING_CHUNKS].push(buffer);
-    this[I.PENDING_BYTE_LENGTH] += buffer.byteLength;
+    this[I.PENDING_CHUNKS].push(chunk);
+    this[I.SETTLE]();
 
     if (this[I.DRAINING] === null) {
-      this[I.DRAINING] = this[I.DRAIN]().finally(
-        () => (this[I.DRAINING] = null),
-      );
+      this[I.DRAINING] = this[I.DRAIN]();
     }
   }
 
   async [$I.WAIT_CHUNK](position) {
-    while (this[I.ERROR] === null) {
-      const { promise } = this[I.PROGRESS];
-      const total = this[I.WRITTEN_CHUNK_COUNT] + this[I.PENDING_CHUNKS].length;
+    const waiter = Promise.withResolvers();
 
-      if (position < total) {
-        return;
-      }
+    this[I.WAITERS].add({ position, resolve: waiter.resolve });
+    this[I.SETTLE]();
+    await waiter.promise;
 
-      if (this[I.DONE]) {
-        return;
-      }
-
-      await promise;
+    if (this[I.ERROR] !== null) {
+      Ow.throw(this[I.ERROR]);
     }
-
-    throw this[I.ERROR];
   }
 
-  [$I.PEEK_CHUNK](position) {
+  [$I.PEEK](position) {
     return this[I.PENDING_CHUNKS][position - this[I.WRITTEN_CHUNK_COUNT]];
-  }
-
-  [$I.WAIT_DUMPING]() {
-    return this[I.DUMPING];
   }
 
   [$I.SET_DONE]() {
     this[I.DONE] = true;
-    this[I.ADVANCE](this[I.WRITTEN_CHUNK_COUNT]);
+    this[I.SETTLE]();
   }
 
-  get pendingChunkCount() {
-    return this[I.PENDING_CHUNKS].length;
-  }
-
-  get pendingByteLength() {
-    return this[I.PENDING_BYTE_LENGTH];
-  }
-
-  get writtenChunkCount() {
-    return this[I.WRITTEN_CHUNK_COUNT];
+  get dumping() {
+    return this[I.DUMPING];
   }
 
   get done() {

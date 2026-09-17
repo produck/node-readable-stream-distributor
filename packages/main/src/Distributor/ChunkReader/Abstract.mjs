@@ -36,10 +36,10 @@ class AbstractChunkReader {
 export default Abstract(
   AbstractChunkReader,
   Abstract({
-    // TODO: leaf obligations still to be enforced here —
+    // TODO: medium-side obligations still to be enforced here —
     //   - answer `done: true` only once the stash is sealed
     //     (`ChunkStash.$I.SEALED`), never just because nothing is readable yet;
-    //   - a leaf may answer `{ value: undefined, done: false }` at the
+    //   - the medium side may answer `{ value: undefined, done: false }` at the
     //     frontier;
     //   - on source error, reject with a distinguishable error so the
     //     consumer stream errors automatically.
