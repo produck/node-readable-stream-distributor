@@ -16,7 +16,7 @@ export default class BufferChunkReader extends ChunkReader.Abstract {
     }
 
     const index = this[ChunkReader.$I.CONSUMED_CHUNK_COUNT];
-    const chunkStash = this.chunkStash;
+    const chunkStash = this[ChunkReader.$I.CHUNK_STASH];
     const done = chunkStash.done && index >= chunkStash.length;
     const result = { done, value: undefined };
 

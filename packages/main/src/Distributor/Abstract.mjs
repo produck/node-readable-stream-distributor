@@ -10,6 +10,7 @@ import * as BufferChunkReader from './BufferChunkReader/index.mjs';
 import * as DegradedChunkReader from './DegradedChunkReader/index.mjs';
 import * as Event from './Event.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
+import * as ChunkReader from './ChunkReader/index.mjs';
 import * as ChunkStash from './ChunkStash/index.mjs';
 import * as SourceReader from './SourceReader/index.mjs';
 import SourceConsumptionAgent from './SourceConsumptionAgent.mjs';
@@ -131,7 +132,7 @@ class ReadableStreamDistributor extends EventTarget {
     for (const forked of this[$I.REGISTRY]) {
       const reader = new DegradedChunkReaderImpl(agent, stash, transferrer);
       const bufferChunkReader = forked[ForkedReadableStream.$I.CHUNK_READER];
-      const progress = bufferChunkReader.consumedChunkCount;
+      const progress = bufferChunkReader[ChunkReader.$I.CONSUMED_CHUNK_COUNT];
 
       reader[DegradedChunkReader.$I.REQUEST_INITIALIZE](progress);
       bufferChunkReader[BufferChunkReader.$I.HANDOVER](reader);

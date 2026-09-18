@@ -118,8 +118,8 @@ JS 在这里既占便宜也吃亏：
 那套其实是**把 condvar 手写出来**（C 的 cv 内部就是这张表）。
 `SourceConsumptionAgent.ensure()` 不取，是因为单飞已经保证"一次拉取
 服务所有入座者"，表长几乎恒为 1–3，三行循环更便宜。**位置门取了**
-（`AbstractTransferrer` 的 `I.WAITERS` + `I.SETTLE()`）：那里的判据是
-"该位已被接受"，改变它的点有四个（入队、dump 落地、`SET_DONE`、
+（`AbstractTransferrer` 的 `I.PENDING_RELEASES` + `I.SETTLE()`）：那里的
+判据是"该位已被接受"，改变它的点有四个（入队、dump 落地、`SET_DONE`、
 `FAIL`），循环版得靠"每次水位变化都广播一次"兜住漏发（而水位那处
 其实放行不了任何人），表版让每个改变点自己结算、判据只写一处。它
 说明了一件事：**循环不是省事，是把簿记换成了重判。**
@@ -164,8 +164,8 @@ JS 在这里既占便宜也吃亏：
 | `SourceReader.read()`             | `I.READING` | 在途读的 settle   |
 | `SourceConsumptionAgent.ensure()` | `pulling`   | 在途拉取的 settle |
 
-位置门（`AbstractTransferrer` 的 `I.WAITERS` + `I.SETTLE()`）面对的是同
-一类问题，但它取了登记表形态（见上文），不在本表内。
+位置门（`AbstractTransferrer` 的 `I.PENDING_RELEASES` + `I.SETTLE()`）面对
+的是同一类问题，但它取了登记表形态（见上文），不在本表内。
 
 两者的分工：前者守"不重复读源"，后者守"不重复落地"。两个槽都必须
 **能被同步判定**（空闲即 `null`），且必须用 `finally` 回位——否则一次
@@ -185,7 +185,7 @@ settle ⇒ 可读），不是这个计数自证。`ensure` 因此**不认识存�
 完整调用链：
 
 ```text
-ForkedReadableStream.pull → ChunkReader.$I.READ()
+ForkedReadableStream.pull → ChunkReader.$I.ENSURE_THEN_READ()
   → agent.ensure(target)      ← 本文的 while
     → sourceReader.read()     ← 另一个同型槽
 ```

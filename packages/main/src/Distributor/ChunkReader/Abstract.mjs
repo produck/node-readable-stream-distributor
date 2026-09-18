@@ -10,15 +10,7 @@ class AbstractChunkReader {
     this[$I.CHUNK_STASH] = chunkStash;
   }
 
-  get chunkStash() {
-    return this[$I.CHUNK_STASH];
-  }
-
   async [$I.READ]() {
-    const agent = this[I.SOURCE_CONSUMPTION_AGENT];
-
-    await agent.ensure(this[$I.CONSUMED_CHUNK_COUNT]);
-
     const result = await this[_I.READ]();
 
     if (!result.done) {
@@ -28,8 +20,12 @@ class AbstractChunkReader {
     return result;
   }
 
-  get consumedChunkCount() {
-    return this[$I.CONSUMED_CHUNK_COUNT];
+  async [$I.ENSURE_THEN_READ]() {
+    const agent = this[I.SOURCE_CONSUMPTION_AGENT];
+
+    await agent.ensure(this[$I.CONSUMED_CHUNK_COUNT]);
+
+    return this[$I.READ]();
   }
 }
 

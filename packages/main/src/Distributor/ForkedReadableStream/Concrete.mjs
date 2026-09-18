@@ -25,19 +25,19 @@ export default class ForkedReadableStream extends ReadableStream {
 
         // The consumer side does exactly one thing: read its own ChunkReader.
         // Driving the source, waiting when short and rejecting on source error
-        // all belong to `_I.READ`'s contract (see ChunkReader/Abstract.mjs);
+        // all belong to the reader's read path (see ChunkReader/Abstract.mjs);
         // a rejection here surfaces as the stream's error automatically.
         const reader = this[$I.CHUNK_READER];
-        const { value, done } = await reader[ChunkReader.$I.READ]();
+        const result = await reader[ChunkReader.$I.ENSURE_THEN_READ]();
 
-        if (done) {
+        if (result.done) {
           this[I.DONE] = true;
           controller.close();
 
           return;
         }
 
-        controller.enqueue(value);
+        controller.enqueue(result.value);
       },
       cancel: () => {
         if (this[$I.CANCELLED]) {

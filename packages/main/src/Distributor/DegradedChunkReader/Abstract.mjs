@@ -10,6 +10,10 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   [I.SEEKED_CHUNK_COUNT] = 0;
   [I.ERROR] = null;
 
+  get chunkStash() {
+    return this[ChunkReader.$I.CHUNK_STASH];
+  }
+
   constructor(sourceConsumptionAgent, chunkStash, transferrer) {
     super(sourceConsumptionAgent, chunkStash);
     this[$I.TRANSFERRER] = transferrer;

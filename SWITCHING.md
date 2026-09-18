@@ -66,8 +66,8 @@ Promise"这一事实：
 ```text
 同 tick（同步）：
   $I.DUMP(stash) 一挥手（不再 await）
-    → 读各拷贝 consumedChunkCount → 构造降级 reader
-    → $I.REQUEST_INITIALIZE(consumedChunkCount) → 换入 $I.CHUNK_READER
+    → 读各拷贝的位置（$I.CONSUMED_CHUNK_COUNT） → 构造降级 reader
+    → $I.REQUEST_INITIALIZE(progress) → 换入 $I.CHUNK_READER
 之后（异步）：
   init 链：等 dumping 落地 → open 介质 → 进度同步（逐界 _I.SEEK）
   read()：过门（该位被接受）→ 队列命中就直接交付；
@@ -159,13 +159,14 @@ Promise"这一事实：
   **已移除**（已认可，2026-08-26）：分发器不承担标识职能。ChunkStash
   作为数据制品层承担数据职责；若某个降级方案需要字符串 `id`，那是
   该降级方案（下游）的责任，`DUMP` 逻辑自理。
-- **构造上下文**：分发器创建 ChunkReader 时提供共享 `chunkStash`
-  （2026-09-09：`progress` 不再入构造）。进度作为请求初始化的参数：
-  分发器调用受保护 `$I.REQUEST_INITIALIZE(progress)`（`progress` = 该
-  拷贝 `consumedChunkCount`，即 skip 位置），降级在调 `_I.INITIALIZE` 前
-  先播种 `$I.CONSUMED_CHUNK_COUNT = progress`。`BufferChunkReader` 直接读
-  `chunkStash`；降级时 stash 由 transferrer 接管——`$I.DUMP` 成功即
-  `DROP`（失败保留现场，供调试）。
+- **构造上下文**：分发器创建 ChunkReader 时提供共享 stash（构造直接
+  收 `chunkStash`，受保护 `$I.CHUNK_STASH`；2026-09-09：`progress` 不再
+  入构造）。进度作为请求初始化的参数：分发器调用受保护
+  `$I.REQUEST_INITIALIZE(progress)`（`progress` = 该拷贝在共享序列的
+  位置，读受保护 `$I.CONSUMED_CHUNK_COUNT`，即 skip 位置），降级在调
+  `_I.INITIALIZE` 前先播种 `$I.CONSUMED_CHUNK_COUNT = progress`。
+  `BufferChunkReader` 经同一符号按 index 读；降级时 stash 由 transferrer
+  接管——`$I.DUMP` 成功即 `DROP`（失败保留现场，供调试）。
   reader 其余要素由子类自己实现；分发器不提供存储实现细节（临时
   目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属降级
   策略内部细节。
@@ -180,7 +181,7 @@ Promise"这一事实：
     具体 reader 类静态声明写侧类 `_S.TRANSFERRER_CTOR`；实例
     由分发器在降级时构造并持有，交接给各拷贝读器（不再一次性守卫）。
   - **位置门（2026-09-16 取代 `chunkStashDumping`）**：读路径每次
-    `$I.WAIT_CHUNK(consumedChunkCount)`；初始化链先 `await dumping`
+    `$I.WAIT_CHUNK($I.CONSUMED_CHUNK_COUNT)`；初始化链先 `await dumping`
     （整份转移落地）再跑 `_I.INITIALIZE`。`get dumping` 是公开观察面，
     可读性不依赖它。
   - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类降级的领域术语，
@@ -244,7 +245,7 @@ Promise"这一事实：
       已解：同 tick 换读器后无拷贝再碰 buffer。
 - [x] 降级读取器在 dump 完成前读取 → 读到不完整/半截数据
       已解（2026-09-16 换机制）：读侧不再认识 dump，改为统一位置门
-      `transferrer.$I.WAIT_CHUNK(consumedChunkCount)`——`read()` 每次
+      `transferrer.$I.WAIT_CHUNK($I.CONSUMED_CHUNK_COUNT)`——`read()` 每次
       先过门，`$I.REQUEST_INITIALIZE` 也在策略 init 前先过门（open/seek
       时介质必已存在）；dump / 写失败统一闩在 `I.ERROR`，门以之拒绝，
       所有（含迟到）消费者一致。
@@ -255,15 +256,16 @@ Promise"这一事实：
       从介质第 0 位起完整读。
 - [ ] 切换途中某拷贝 `cancel` / `destroy` → 未完成的 reader 怎么办？
 - [x] **在途 `read` 仍绑旧读器**：`pull` 先取 `$I.CHUNK_READER` 再调
-      `$I.READ`，而 `$I.READ` 内的 `ensure()` 期间会换读器——`this` 仍是旧
-      的内存读器；DROP 之后它再读即抛 `ChunkStash has been dropped`。
+      `$I.ENSURE_THEN_READ`，其中 `ensure()` 期间会换读器——`this` 仍是
+      旧的内存读器；DROP 之后它再读即抛 `ChunkStash has been dropped`。
       已解（2026-09-16）：换读器时由分发器调内存族的 `$I.HANDOVER(新读器)`
       交接在途那一笔（位是本文件私有符号，族表与基类都不认识它）；内存
-      介质侧在 `ensure()` 回来后重看一眼，已被交接就整笔转发给接替者。
+      介质侧在 `ensure()` 回来后重看一眼，已被交接就整笔转发给接替者
+      ——转发走接替者的单纯读 `$I.READ`，不再重复 ensure。
       换读器只可能发生在 `ensure()` 的拉取里，所以这一眼足够，也不再依赖
       DROP 时序。实测三种：慢盘 30ms、同步秒落地（无 await）、以及"这次读
       的 ensure 还要再拉六趟"，序列都严格 c1..c20（或 c11..c20）+ done。
-- [x] 慢拷贝落后：skip 位置 = 该拷贝 `consumedChunkCount`，如何保证
+- [x] 慢拷贝落后：skip 位置 = 该拷贝的 `$I.CONSUMED_CHUNK_COUNT`，如何保证
       切换瞬间读到的是已 dump 的边界？
       已解：skip 到位在 init 过程中，`read()` await init 后才读文件。
 - [x] dump 期间 source 有新数据到达 → 先入 buffer 还是直接入文件？
@@ -298,7 +300,7 @@ Promise"这一事实：
   `_I.WRITE`），写侧类经 reader 静态 `_S.TRANSFERRER_CTOR` 声明。
 - **寻道定位在介质侧**（2026-09-09）：`$I.REQUEST_INITIALIZE(progress)`
   播种 `$I.CONSUMED_CHUNK_COUNT = progress`（规定位置）；降级介质侧实现的 `_I.INITIALIZE`
-  （惰性：首次读介质前）按 `consumedChunkCount` 自实现定位——经家族
+  （惰性：首次读介质前）按 `$I.CONSUMED_CHUNK_COUNT` 自实现定位——经家族
   抽象 `_I.SEEK`（只读 4B 头并前进游标、不读 body）逐界寻道，或按
   存储做 O(1) 跳转。基类不含 `_I.SEEK` / `$I.SKIP`（定位非通用驱动器）。
 - `_I.READ` 按 position 游标前进（读 body）。

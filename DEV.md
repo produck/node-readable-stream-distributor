@@ -26,7 +26,7 @@
   私有 `I`/`S`**。
 - 模块路径即命名空间——跨模块同词不冲突（降级 `_I.READ` 与基类 `_I.READ`
   各自独立）；符号表的键数不设上限。
-- 面向调用者的具名成员（getter、`chunkStash`）用普通字符串键。
+- 面向调用者的具名成员（如 `get dumping` / `get done`）用普通字符串键。
 - 缩写白名单：构造器（`new.target` 捕获）→ `CTOR`。**符号键持有类值一律
   以 `_CTOR` 结尾**（`_S.DEGRADED_CHUNK_READER_CTOR` /
   `_S.TRANSFERRER_CTOR`）。组织级共享符号集（待建）收编这类通用含义的
@@ -121,10 +121,13 @@
 
 #### 基类 AbstractChunkReader = "有位置的读头"
 
-- `$I`：`CONSUMED_CHUNK_COUNT` / `CHUNK_STASH` / `READ`；`_I`：`READ`；公开只读
-  `chunkStash` / `consumedChunkCount`。
-- `$I.READ`：`await ensure(CONSUMED_CHUNK_COUNT)` → `_I.READ()` → 介质侧报非终态才
-  `CONSUMED_CHUNK_COUNT++` → 原样返回读结果；`done` 的含义不在这里（见「读路径」）。
+- `$I`：`CONSUMED_CHUNK_COUNT` / `CHUNK_STASH` / `READ` /
+  `ENSURE_THEN_READ`；`_I`：`READ`；无字符串键成员（位置与 stash 全走 `$I`）。
+- `$I.READ`（单纯读）：`_I.READ()` → 介质侧报非终态才
+  `CONSUMED_CHUNK_COUNT++` → 原样返回读结果；`done` 的含义不在这里
+  （见「读路径」）。
+- `$I.ENSURE_THEN_READ`（驱动入口）：`await ensure(CONSUMED_CHUNK_COUNT)` →
+  `$I.READ()`；分发流的 `pull` 走这条。
 - 基类**不认识相位**：内存 → 介质这一层不写在通用读路径里——接替是内存族
   自己的事（见下）。
 - 不持初始化/关闭（已迁降级家族）；构造直接收 `chunkStash`（不包对象）。
@@ -138,7 +141,8 @@
   位 `.#successor` + 受保护 `$I.HANDOVER(successor)`；抽象 Reader 的符号表
   里没有这两个（交接不是通用概念，只是内存族的事）。换读器时由分发器调
   `$I.HANDOVER(新读器)`（不直接写字段）；介质侧进来先看那位，非空就把
-  整笔读转发给接替者。
+  整笔读转发给接替者——转发走接替者的**单纯读** `$I.READ`（这一笔的
+  ensure 已由转发者做过），不再重复。
 - **在途读自愈就落在这一眼上**：换读器只可能发生在 `ensure()` 的那趟
   拉取里（触发降级的那块），所以 `ensure()` 回来后重看一眼就够；不再
   依赖 DROP 时序。旧实例自己那一个位置照旧前进——它已不被任何 fork
@@ -150,6 +154,9 @@
   `INITIALIZE` / `SYNC` / `READ_BACK`；`$I`：`TRANSFERRER` / `REQUEST_INITIALIZE` / `CLOSE`；
   `_I`：`READ` / `INITIALIZE` / `CLOSE` / `SEEK`；`_S`：`TRANSFERRER_CTOR`
   （策略给出的写侧**类**）。
+- **下游便利面**：`get chunkStash`（共享 stash，`_I.DUMP(chunkStash)` 的
+  入参就是它）与 `get closed`。除此之外不开口——位置是家族的记账，
+  策略只见"跨一条边界"。
 - `$I.TRANSFERRER` 是降级时由分发器交接的那个写侧实例（基类构造第三
   个参数）；读侧原语 `$I.WAIT_CHUNK(position)` / `$I.PEEK(position)`
   由它取。
@@ -172,8 +179,10 @@
 
 ### 读路径
 
-- 基类 `$I.READ` 只做四件：`await ensure(CONSUMED_CHUNK_COUNT)` → `await _I.READ()`
-  → 非终态才 `CONSUMED_CHUNK_COUNT++` → 原样返回读结果；`done` 的含义不归它。
+- 基类 `$I.READ` 就是取一笔：`await _I.READ()` 后非终态才
+  `CONSUMED_CHUNK_COUNT++`，原样返回读结果；带 ensure 的驱动入口是
+  `$I.ENSURE_THEN_READ`（它只是在这句前面加一次 `await ensure(...)`），
+  也是 `pull` 调的那个；`done` 的含义不归它。
 - **`done` 归介质侧**：内存路径 = `stash.done && index >= stash.length`
   （存储层终态 + 自己的 backlog 闸）；文件路径 = 介质末尾标志 + 位置。
 - 前沿不往下传：降级相位 `ensure()` 只保证"目标已拉取"（落点在队列或
@@ -181,7 +190,7 @@
   已拉取即可存取。门放行后仍取不到货，属契约违规，按断言处理。
 - `CONSUMED_CHUNK_COUNT` 只在介质侧交出内容时前进，因此总是"下一个要取的位置"；
   终态那次读不推进。降级定位拿它做 skip 依赖这一点。
-- 降级读法：**不覆写 `$I.READ`、不走 super**，直接实现
+- 降级读法：**不覆写 `$I.READ` / `$I.ENSURE_THEN_READ`、不走 super**，直接实现
   `AbstractChunkReader._I.READ`：过门 `$I.WAIT_CHUNK(位置)` → 队列命中
   （`$I.PEEK` 有值）**直接交付、不碰介质侧，也不推进已跨数** → 否则
   （已落介质 / 到头）走 `I.READ_BACK()` **读回**：先 await 就位点
@@ -194,10 +203,10 @@
 
 ### 定位（skip 由驱动器引导）
 
-- `CONSUMED_CHUNK_COUNT` = fork 在共享序列的**绝对位置**（受保护）；切换时以各 fork
-  `consumedChunkCount` 作 `REQUEST_INITIALIZE` 的 progress（播种，非累计），
-  同一步里用 `BufferChunkReader.$I.HANDOVER(新读器)` 交接在途那一笔，
-  再换 `$I.CHUNK_READER`。
+- `CONSUMED_CHUNK_COUNT` = fork 在共享序列的**绝对位置**（受保护）；切换时以
+  各 fork 的 `$I.CONSUMED_CHUNK_COUNT` 作 `REQUEST_INITIALIZE` 的 progress
+  （播种，非累计），同一步里用 `BufferChunkReader.$I.HANDOVER(新读器)` 交接
+  在途那一笔，再换 `$I.CHUNK_READER`。
 - **定位是家族的义务，不是介质侧的**：`I.SEEKED_CHUNK_COUNT` 记游标已
   寻道跨过多少条记录（出生 = 0，即它此刻站在第几条上；`_I.SEEK` 跨边界
   与 `_I.READ` 交付各算一次——`_I.READ` 视为"寻道 + 取货"）；`I.SYNC()`
@@ -225,7 +234,7 @@
     **接管** stash 的整份块列表（同一批对象，只加引用，不复制）——此刻
     队列必空，因为 `$I.DUMP` 是队列的第一个写入者（transferrer 刚在
     `$I.DEGRADE` 里构造出来就挥手），这条是接管式写法的前提。把那一趟
-    记进 `I.DUMPING` 并返回，本体在 `$I.START_DUMPING` 里——同一步里就调
+    记进 `I.DUMPING` 并返回，本体在 `I.START_DUMPING` 里——同一步里就调
     抽象 `_I.DUMP` 开工，成功即 `$I.DROP` 释放载体、清掉接管的这 L 条
     （已落盘）并把水位一次推满；失败只闩 `I.ERROR` 并结算门，**不 DROP**
     （保留现场待查）。返回的 Promise 失败时以转义错误拒给，唯一消费者是
@@ -241,18 +250,20 @@
 - 读侧原语（受保护）：`$I.WAIT_CHUNK(position)` = 等到该位**已被接受**
   （`position < 水位 + 队列`）或**永远不会有块**（done）；终态错误以
   `I.ERROR` 拒绝。`$I.PEEK(position)` 给出**还在队列里**的那一块
-  （越界/已落介质则 `undefined`，由介质侧判）。等待靠登记表：等待者把
-  `{ position, resolve }` 记进 `I.WAITERS`，改变可读判定的四处（入队、
-  dump 落地、`SET_DONE`、`FAIL`）各调一次 `I.SETTLE()`，由它按
-  `position < 水位 + 队列` 或 `DONE` / `ERROR` 放行够号的等待者——没有
-  广播，也没有各自重判。drain 落盘**不**结算：对 `total = 水位 + 队列`
+  （越界/已落介质则 `undefined`，由介质侧判）。等待靠登记表：
+  `I.PENDING_RELEASES` = `Map<resolve, position>`——键是这一位的放行指令，
+  值是它等的位。
+  `$I.WAIT_CHUNK` 登记后立刻结算一次；改变可读判定的四处（入队、dump
+  落地、`SET_DONE`、`FAIL`）各调一次 `I.SETTLE()`，由它按
+  `position < 水位 + 队列` 或 `DONE` / `ERROR` 放行够号的——没有广播，
+  也没有各自重判。drain 落盘**不**结算：对 `total = 水位 + 队列`
   恒定，放行不了任何人；门收不到介质进度，也就不可能让它参与可读性。
 - **可读 = 被接受**：在介质上或在队列里都算。介质的进度只决定"从哪儿
   取"（队列 or 介质侧），不决定"能不能取"。
 - **纯内部对象**：实例由分发器私有持有，**不开观察面**——要看就进
   调试器按符号表读成员（`I.PENDING_CHUNKS` / `I.WRITTEN_CHUNK_COUNT` /
-  `I.WAITERS` / `I.DRAINING` / `I.DONE` / `I.ERROR` / `I.DUMPING`）。对家族
-  只留一个读入口：`get dumping`
+  `I.PENDING_RELEASES` / `I.DRAINING` / `I.DONE` / `I.ERROR` /
+  `I.DUMPING`）。对家族只留一个读入口：`get dumping`
   （初始化链等的就是它落地），其余交互全走 `$I` 原语。
 - 实例与 `ChunkStash` 1:1，因此状态就是普通字段，不再用 WeakMap /
   WeakSet 按 stash 键控。抽象钩子 `_I.DUMP` / `_I.WRITE` 由下游实现。
@@ -335,24 +346,32 @@
   广播，而"队列 -1、水位 +1"对 `total` 恒定，那次唤醒对等待者不可观测
   （空唤醒）。真正改变 `total` 的入队处反倒不发信号，靠 drain 顺手那发
   兜住。
-- 结论：改为等待者登记表（`I.WAITERS`）+ 结算（`I.SETTLE`）。判据只写在
-  `I.SETTLE` 一处（`position < 水位 + 队列`，或 `DONE` / `ERROR`），
-  够号的当场放行并出表；`$I.WAIT_CHUNK` 只做"登记 → 结算 → 等"，
-  错误在末尾复查一次抛出。
+- 结论：改为等待者登记表（`I.PENDING_RELEASES`，`Map<放行指令, 位置>`）
+  加结算（`I.SETTLE`）：判据只写在 `I.SETTLE` 一处（`position < 水位 + 队列`，
+  或 `DONE` / `ERROR`），够号的当场放行并出表；`$I.WAIT_CHUNK` 只做
+  "登记 → 结算 → 等"，错误在末尾复查一次抛出。
 - 义务：改变可读判定的地方都必须调 `I.SETTLE()`——入队、dump 落地、
   `$I.SET_DONE`、`I.FAIL` 共四处。漏一处即静默挂死。drain 落盘**不**
   结算：它对 `total = 水位 + 队列` 恒定（队列 -1、水位 +1），放行不了
   任何人；不通知门也结构性保证"介质进度不决定可读性"（此前那处是
   O(等待者数) 的空扫，分发流越多越白扫）。
 - 作废：`I.PROGRESS` / `I.ADVANCE`；`while` 重判与"唯一发布点"的说法。
-- 空表早返回：`I.SETTLE` 首行见 `I.WAITERS` 为空即返回——写侧每块两次
-  结算（入队、落盘）在"无人在等"时不扫表；无人在等时本就无人可放行，
-  是纯收益，且只有"读器贴着前沿"时才不触发。
-- 实测（`logs/probe-wait-cost.mjs`，1e6 次 / 1e5 笔）：命中路径过门 357ns
-  对"命中即返回"112ns（整条读路径 2436 → 1975ns，约 −17%）；其中 promise
-  构造只占 ~17ns、扫表 ~170ns。读路径本身 2.3µs/块 ≈ 27GB/s（64KB 块），
-  远快于任何现实消费者，故**不**改命中即返回：它要让判据落两处、并把
-  `I.ERROR` 检查提到命中路径，为 17% 换掉"判据只写一处"，不划算。
+- 终局不单列分支：放行写成单循环 `position < 水位 + 队列 || isTerminal`，
+  一处 `delete` + `resolve`。试过把终局提成前置分支（整表 `resolve` +
+  `clear()` 后返回）：逻辑等价、交错 A/B 测不出收益（四样本 3130 / 3137
+  ns/笔读），但同屏两个 `for...of` 让「放行点只有一处」不再一眼可见，故回退。
+- 登记表容器取 `Map<放行指令, 位置>`（键是 `resolve`，故 `$I.WAIT_CHUNK`
+  能就地 `set(resolve, position)`）：不是为了省那个字面量——交错 A/B 实测
+  Map 两种取位写法与 Set 版都无差异——而是让容器自己说明键值分工。
+- 空表早返回：`I.SETTLE` 首行见 `I.PENDING_RELEASES` 为空即返回——写侧
+  每块两次结算（入队、落盘）在"无人在等"时不扫表；无人在等时本就无人
+  可放行，是纯收益，且只有"读器贴着前沿"时才不触发。
+- 实测（`logs/probe-wait-cost.mjs`，1e6 次 / 1e5 笔）：命中路径过门
+  445–483ns 对"命中即返回"153–155ns（整条读路径 ~3.0µs → ~2.6µs，约
+  −15%）；promise 构造本身只占 ~20ns（地板 ~30ns 对"建 promise 再
+  await" ~58ns）。读路径本身 ~3µs/块 ≈ 22GB/s（64KB 块），远快于任何
+  现实消费者，故**不**改命中即返回：它要让判据落两处、并把 `I.ERROR`
+  检查提到命中路径，为 15% 换掉"判据只写一处"，不划算。
 - 实测（`logs/probe-gate.mjs`）：入队即放行；按号放行（号 2 要等第三块）；
   dump 在途不放行、落地即放行；`SET_DONE` 放行"永不会有块"的等待者；
   `FAIL` 以原因拒绝等待者与后来者。三个既有探针输出不变。

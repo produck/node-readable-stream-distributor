@@ -110,13 +110,13 @@ graph TD
 | 模块                          | 职责                                                                                                                                                   |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`stashByteLimit` 由下游实现                                                                                    |
-| `AbstractChunkReader`         | 拷贝侧读取抽象——持有共享 `chunkStash`；进度（`consumedChunkCount`）与前沿驱动（`$I.READ` → `_I.READ`）                                                 |
+| `AbstractChunkReader`         | 拷贝侧读取抽象——受保护 `$I.CHUNK_STASH` 持共享 stash；进度与前沿驱动（`$I.ENSURE_THEN_READ` → `$I.READ` → `_I.READ`）                                  |
 | `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
 | `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                     |
 | `AbstractTransferrer`         | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE`，读侧位置门与队列计数                                                    |
 | `ChunkStash`                  | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/seal/setDone/drop），读侧公开                                                              |
 | `ForkedReadableStream`        | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                 |
-| `SourceReader`                | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态、计已消费块数），不含调度                                                          |
+| `SourceReader`                | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态），不含调度                                                                        |
 | `SourceConsumptionAgent`      | 源流消费代理（内部类）——统筹调度（拉不拉、并发合并 single-flight、背压）与落点；按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享 |
 
 ### 类图
@@ -154,7 +154,6 @@ classDiagram
         +done
         +error
         +cancelled
-        +consumedChunkCount
         +read()
         +cancel(reason)
     }
@@ -172,14 +171,13 @@ classDiagram
 
     class AbstractChunkReader {
         <<abstract>>
-        +chunkStash
-        +consumedChunkCount
     }
 
     class BufferChunkReader
 
     class AbstractDegradedChunkReader {
         <<abstract>>
+        +chunkStash
         +closed
     }
 
@@ -219,10 +217,10 @@ classDiagram
 - `ReadableStreamDistributor` 与 `ForkedReadableStream` 分别以
   `EventTarget` / `ReadableStream` 为基类，继承自平台而非本模块。
 - `ForkedReadableStream` 与 `AbstractChunkReader` 是 1:1——每个拷贝
-  持有自己的读取器，进度（`consumedChunkCount`）天然 per-fork。
-- `ChunkStash` 由分发器持有并注入每个 `AbstractChunkReader`（`chunkStash`），
-  因此所有拷贝读取器共享同一份；`BufferChunkReader` 经继承的
-  `chunkStash` 按 index 读取。它是当前唯一的 chunk 载体。
+  持有自己的读取器，进度（受保护 `$I.CONSUMED_CHUNK_COUNT`）天然 per-fork。
+- `ChunkStash` 由分发器持有并注入每个 `AbstractChunkReader`（受保护
+  `$I.CHUNK_STASH`），因此所有拷贝读取器共享同一份；`BufferChunkReader`
+  经同一个符号按 index 读取。它是当前唯一的 chunk 载体。
 - `SourceReader` 与拷贝流无直接连线：拷贝只读自己的 ChunkReader，
   不接触 source（见「背压」）。它在构造时即锁死源，并独占其整个生命
   周期（永不 `releaseLock()`）：给分发器的源归它所有，直到分发器对象
@@ -349,11 +347,15 @@ interface ChunkReader {
 或存储层已终结"，所以介质侧被调用时取不到货只可能是契约违规（实现侧按
 断言处理），不是一种要往下传的状态。
 
-驱动作用域固定在基类的受保护 `$I.READ`（每拷贝的驱动入口，包内唯一
-调用者是 `ForkedReadableStream.pull`）：
+驱动作用域固定在基类的受保护 `$I.ENSURE_THEN_READ`（每拷贝的驱动入口，
+包内唯一调用者是 `ForkedReadableStream.pull`）：
 
-- **推进**：它 `await ensure(CONSUMED_CHUNK_COUNT)` → `await _I.READ()`；介质侧报非终态
-  才 `CONSUMED_CHUNK_COUNT++`，再原样返回介质侧的读结果。因此前进点全包只有一处，
+- **入口**：`$I.ENSURE_THEN_READ` = `await ensure(CONSUMED_CHUNK_COUNT)` +
+  `$I.READ`。内存族把在途那笔转发给接替者时只走 `$I.READ`——这一笔的
+  ensure 已由转发者做过，不必再向代理问一遍。
+- **取一笔**：`$I.READ` = `await _I.READ()` → 介质侧报非终态才
+  `CONSUMED_CHUNK_COUNT++` → 原样返回读结果；不含 ensure。因此前进点全包
+  只有一处，
   且只在真的交出内容时前进——它总是"下一个要取的位置"。
 - **不解释 `done`**：`done` 的含义与判定都归介质侧，它只借这个标志决定是否推进，
   并原样转发结果的形状。
@@ -378,7 +380,8 @@ graph BT
 - `BufferChunkReader` 直接消费共享 `ChunkStash`（按 index 读，`done`
   由 `stash.length` 决定），是内存路径分支。
 - `AbstractDegradedChunkReader` 是降级读取器家族的抽象中间层，**纯读**：
-  - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`；读侧**不认识
+  - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`（下游子类另开
+    `get chunkStash` / `get closed` 两个便利面）；读侧**不认识
     dump**，只认**接受度** `transferrer.$I.WAIT_CHUNK(position)`：每次
     `read()` 先过门，队列里还在的位由抽象层直接交付；要走介质时先惰性
     初始化——策略要 open / 定位时介质必已存在；`close()` await 它。
@@ -399,7 +402,7 @@ graph BT
     也不判断换读器时机。
   - `$I.DUMP(chunkStash)` — 交出整个 `ChunkStash`（不含封存），**同步
     返回**：先接管 stash 的整份块列表（此刻队列必空），再把那一趟记进
-    `I.DUMPING` 并返回，本体在 `$I.START_DUMPING` 里——同一步里就调抽象
+    `I.DUMPING` 并返回，本体在 `I.START_DUMPING` 里——同一步里就调抽象
     `_I.DUMP` 开工，成功即 `DROP` 载体、清掉接管的这 L 条（已落盘）并把
     水位一次推满；失败只闩 `I.ERROR` 并结算门（保留现场不 DROP），返回的
     Promise 以转义错误拒给分发器挂 `warn`。

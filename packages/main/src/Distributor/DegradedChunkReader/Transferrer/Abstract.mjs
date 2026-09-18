@@ -7,28 +7,28 @@ import { I, $I, _I } from './Symbol.mjs';
 const noop = () => {};
 
 class AbstractTransferrer {
-  [I.PENDING_CHUNKS] = [];
   [I.WRITTEN_CHUNK_COUNT] = 0;
-  [I.WAITERS] = new Set();
+  [I.PENDING_CHUNKS] = [];
+  [I.PENDING_RELEASES] = new Map();
   [I.DRAINING] = null;
   [I.DUMPING] = null;
   [I.ERROR] = null;
   [I.DONE] = false;
 
   [I.SETTLE]() {
-    const waiters = this[I.WAITERS];
+    const pendingReleases = this[I.PENDING_RELEASES];
 
-    if (waiters.size === 0) {
+    if (pendingReleases.size === 0) {
       return;
     }
 
     const total = this[I.WRITTEN_CHUNK_COUNT] + this[I.PENDING_CHUNKS].length;
-    const open = this[I.DONE] || this[I.ERROR] !== null;
+    const isTerminal = this[I.DONE] || this[I.ERROR] !== null;
 
-    for (const waiter of waiters) {
-      if (waiter.position < total || open) {
-        waiters.delete(waiter);
-        waiter.resolve();
+    for (const [release, position] of pendingReleases) {
+      if (position < total || isTerminal) {
+        pendingReleases.delete(release);
+        release();
       }
     }
   }
@@ -63,7 +63,7 @@ class AbstractTransferrer {
     this[I.DRAINING] = null;
   }
 
-  async [$I.START_DUMPING](chunkStash) {
+  async [I.START_DUMPING](chunkStash) {
     this[I.PENDING_CHUNKS] = [...chunkStash.chunks()];
 
     const { length } = chunkStash;
@@ -84,7 +84,7 @@ class AbstractTransferrer {
   }
 
   [$I.DUMP](chunkStash) {
-    return (this[I.DUMPING] = this[$I.START_DUMPING](chunkStash));
+    return (this[I.DUMPING] = this[I.START_DUMPING](chunkStash));
   }
 
   [$I.WRITE](chunk) {
@@ -101,11 +101,11 @@ class AbstractTransferrer {
   }
 
   async [$I.WAIT_CHUNK](position) {
-    const waiter = Promise.withResolvers();
+    const { promise, resolve } = Promise.withResolvers();
 
-    this[I.WAITERS].add({ position, resolve: waiter.resolve });
+    this[I.PENDING_RELEASES].set(resolve, position);
     this[I.SETTLE]();
-    await waiter.promise;
+    await promise;
 
     if (this[I.ERROR] !== null) {
       Ow.throw(this[I.ERROR]);
