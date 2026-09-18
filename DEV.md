@@ -32,12 +32,15 @@
   `_S.TRANSFERRER_CTOR`）。组织级共享符号集（待建）收编这类通用含义的
   键，避免每个模块重复声明。
 
-### Static + instance 委托
+### 受保护实例字段与静态钩子（`_S`）
 
-- 公开静态 getter 委托 `_S` 抽象；实例经构造时捕获的 `I.CTOR`
-  （`new.target`）委托静态侧（不用 `this.constructor`）。
-- `stashByteLimit` 默认 `os.freemem()`；`Parser.mjs` 提供 `.returns`
-  解析器（如 `NonNegativeInteger`）。
+- 分发器没有公开静态面：策略只经 `_S` 静态钩子声明类值（现只剩
+  `_S.DEGRADED_CHUNK_READER_CTOR`），消费者是构造时捕获的 `I.CTOR`
+  （`new.target`），不用 `this.constructor`。
+- 内存→介质阈值：构造参数 `stashByteLimit`（默认 `1024 ** 3`，即 1GiB），
+  构造时经 `NonNegativeInteger` 校验后落进受保护字段
+  `$I.STASH_BYTE_LIMIT`；唯一写入点就是构造器，此后只读。降级触发点
+  因此确定可复现。
 - `_S.DEGRADED_CHUNK_READER_CTOR`：策略侧给出的降级读取器类引用，
   degrade 时用它构造各 fork 的新读取器；暂以 `M.Function` 弱校（只确认
   是函数），待收敛为“必须是降级家族的子类”。
@@ -59,10 +62,11 @@
   `ForkedReadableStream`（`label` 助记符，默认占位串 `'<UNDEFINED>'`，
   须为 string）——读器取自当前相位字段 `I.CURRENT_CHUNK_READER_CTOR`
   （初值 `BufferChunkReader`，降级换读器的同一同步块里翻成策略类，后者
-  当场 `$I.REQUEST_INITIALIZE(0)` 播种）；`get stashByteLimit`（委托
-  静态）；`get degraded`（代理消费代理的相位事实）；`destroy()` 为 TODO。
+  当场 `$I.REQUEST_INITIALIZE(0)` 播种）；`get degraded`（代理消费代理的
+  相位事实）；`destroy()` 为 TODO。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
-  `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）· `$I.REGISTRY`（fork 集，
+  `ChunkStash`）· `$I.STASH_BYTE_LIMIT`（阈值，构造器唯一写入）·
+  `I.SOURCE_CONSUMPTION_AGENT`（消费代理）· `$I.REGISTRY`（fork 集，
   `$I.PRUNE` 清理已取消 fork）· `I.CTOR`（捕获的自身类）· 两个类值
   getter `I.DEGRADED_CHUNK_READER_CTOR` / `I.TRANSFERRER_CTOR`，以及当前
   相位字段 `I.CURRENT_CHUNK_READER_CTOR`（初值 `BufferChunkReader`，降级
@@ -72,7 +76,7 @@
 - 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（push /
   `$I.SEAL()` / `$I.SET_DONE()`）归 `SourceConsumptionAgent`，dump→drop
   归分发器。
-- 降级：**触发在消费代理**（stash 字节超过 `stashByteLimit`），**执行在分发器** `$I.DEGRADE`——
+- 降级：**触发在消费代理**（stash 字节超过构造时定下的阈值），**执行在分发器** `$I.DEGRADE`——
   构造写侧实例（按读器家族 `_S.TRANSFERRER_CTOR` + 预置构造参数）、
   执行其 `dump`、遍历 registry、选降级 reader 类、换掉各 fork 的读取器
   都留在结构侧。

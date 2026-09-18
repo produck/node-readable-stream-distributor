@@ -68,7 +68,7 @@ export default class SourceConsumptionAgent {
     chunkStash[ChunkStash.$I.PUSH](chunk);
 
     // NEED DEGRADING???
-    if (chunkStash.byteLength > distributor.stashByteLimit) {
+    if (chunkStash.byteLength > distributor[$I.STASH_BYTE_LIMIT]) {
       chunkStash[ChunkStash.$I.SEAL]();
       this.degraded = true;
       distributor[$I.DEGRADE]();

@@ -1,7 +1,3 @@
-// TODO: remove at repo wrap-up — a platform-neutral base must not import
-//   node:os; the default limit belongs to a Node-specific subclass.
-import * as os from 'node:os';
-
 import * as Ow from '@produck/ow';
 import { ThrowTypeError } from '@produck/type-error';
 import Abstract, { Member as M } from '@produck/es-abstract';
@@ -16,7 +12,7 @@ import * as SourceReader from './SourceReader/index.mjs';
 import SourceConsumptionAgent from './SourceConsumptionAgent.mjs';
 import { isReadableStreamLike } from './Checker.mjs';
 import { I, $I, _S } from './Symbol.mjs';
-import { NonNegativeInteger } from './Parser.mjs';
+import * as Parser from './Parser.mjs';
 
 const { Transferrer } = DegradedChunkReader;
 
@@ -24,32 +20,22 @@ class ReadableStreamDistributor extends EventTarget {
   [I.CHUNK_STASH] = new ChunkStash.Concrete();
   [I.CURRENT_CHUNK_READER_CTOR] = BufferChunkReader.Concrete;
   [I.DESTROYED] = false;
+  [$I.STASH_BYTE_LIMIT];
   [I.TRANSFERRER_ARGS] = [];
   [$I.TRANSFERRER] = null;
   [$I.REGISTRY] = new Set();
 
-  static [_S.STASH_BYTE_LIMIT]() {
-    return os.freemem();
-  }
-
-  static get stashByteLimit() {
-    return this[_S.STASH_BYTE_LIMIT]();
-  }
-
-  constructor(source) {
+  constructor(source, stashByteLimit = 1024 ** 3) {
     super();
 
     if (!isReadableStreamLike(source)) {
       ThrowTypeError('source', 'a WHATWG ReadableStream');
     }
 
+    this[$I.STASH_BYTE_LIMIT] = Parser.NonNegativeInteger(stashByteLimit);
     this[I.CTOR] = new.target;
     this[I.SOURCE_READER] = new SourceReader.Concrete(source);
     this[I.SOURCE_CONSUMPTION_AGENT] = new SourceConsumptionAgent(this);
-  }
-
-  get stashByteLimit() {
-    return this[I.CTOR].stashByteLimit;
   }
 
   get degraded() {
@@ -153,7 +139,6 @@ class ReadableStreamDistributor extends EventTarget {
 export default Abstract(
   ReadableStreamDistributor,
   Abstract.Static({
-    [_S.STASH_BYTE_LIMIT]: M.Method().returns(NonNegativeInteger),
     [_S.DEGRADED_CHUNK_READER_CTOR]: M.Function,
   }),
 );

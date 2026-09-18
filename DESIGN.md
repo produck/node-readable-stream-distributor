@@ -29,8 +29,8 @@
 `ReadableStreamDistributor` 是**抽象类**——不能直接 `new`，下游须继承；
 默认实现可按需覆盖。
 
-- `get stashByteLimit` → 委托静态 `[_S.STASH_BYTE_LIMIT]()`，默认
-  `os.freemem()`
+- 内存→介质阈值：构造参数 `stashByteLimit`（默认 `1GiB`），构造时校验并
+  落进受保护字段 `$I.STASH_BYTE_LIMIT`，此后只读
 - `get degraded` → 代理 `SourceConsumptionAgent` 的相位事实
 - `[_S.DEGRADED_CHUNK_READER_CTOR]` → 策略侧给出的降级读取器类，degrade
   时用它就地构造各 fork 的新读取器
@@ -49,7 +49,8 @@ import { ReadableStreamDistributor } from '@produck/readable-stream-distributor'
 class MyDistributor extends ReadableStreamDistributor {}
 const distributor = new MyDistributor(source);
 
-// 注意：一旦溢出到磁盘后，stashByteLimit 不再被查询（单向门）
+// 注意：阈值只在构造时传入（默认 `1GiB`）；一旦溢出到磁盘后
+// `$I.STASH_BYTE_LIMIT` 不再被查询（单向门）
 
 const copy = distributor.fork('sha1-checker');
 // label：助记符，用于事件和统计中标识拷贝，不作唯一性约束
@@ -109,7 +110,7 @@ graph TD
 
 | 模块                          | 职责                                                                                                                                                   |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。`stashByteLimit` 由下游实现                                                                                    |
+| `ReadableStreamDistributor`   | 抽象类——多拷贝分发，引用计数，策略切换。阈值是构造参数（默认 `1GiB`），落受保护字段                                                                    |
 | `AbstractChunkReader`         | 拷贝侧读取抽象——受保护 `$I.CHUNK_STASH` 持共享 stash；进度与前沿驱动（`$I.ENSURE_THEN_READ` → `$I.READ` → `_I.READ`）                                  |
 | `BufferChunkReader`           | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
 | `AbstractDegradedChunkReader` | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                     |
@@ -134,7 +135,6 @@ classDiagram
 
     class ReadableStreamDistributor {
         <<abstract>>
-        +stashByteLimit
         +degraded
         +fork(label)
         +destroy()
@@ -306,8 +306,9 @@ title Chunk 文件格式
 切换文件时，先将 `Buffer[]` 内容按文件格式写入，清空数组，
 后续 chunk 直接走文件。
 
-内存→磁盘是单向门：一旦切换，`stashByteLimit` 后续变化不再
-生效——木已成舟，不再回头。
+内存→磁盘是单向门：一旦切换就不再回头——阈值也在构造时定死，
+不存在后续变化。默认 `1GiB` 取"多数情况不降级"的主流行为：代价是
+慢消费者下最多驻留这么多内存，小内存宿主应显式调小。
 
 ## Chunk 读取器
 
@@ -553,13 +554,13 @@ sequenceDiagram
 
 ## 依赖
 
-零外部依赖。仅使用：
+零外部依赖，且当前源码**零 `node:` 导入**——只用平台全局：
 
-- `node:fs`（`fs.open`、`fileHandle.read`、`fileHandle.write`）
-- `node:stream/web`（`ReadableStream`）
-- `node:os`（`freemem`、`tmpdir`）
-- `node:path`（`join`）
-- `node:crypto`（`randomBytes`——临时文件名）
+- `EventTarget` / `ReadableStream`（WHATWG，Node 与浏览器都有）
+- `Set` / `Map` / `Promise.withResolvers`（语言内建）
+
+将来实现真正的文件降级时才会用到 `node:fs`（打开/读写）与 `node:crypto`
+（临时文件名的随机段），且都应落在 Node 专属模块里，不进平台中立的基类。
 
 ## 待定
 
@@ -605,8 +606,7 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
 
 ### 纯内存模式
 
-下游在 `get stashByteLimit()` 中返回 `Number.MAX_SAFE_INTEGER`
-即可事实上禁用磁盘溢出。
+下游构造时传 `Number.MAX_SAFE_INTEGER` 即可事实上禁用磁盘溢出。
 
 ## 可观测性
 

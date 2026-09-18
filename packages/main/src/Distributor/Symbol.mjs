@@ -22,6 +22,7 @@ export const I = deepFreeze({
   DESTROYED: I_DESTROYED,
 });
 
+const $I_STASH_BYTE_LIMIT = Symbol('.$stashByteLimit');
 const $I_REGISTRY = Symbol('.$registry');
 const $I_TRANSFERRER = Symbol('.$transferrer');
 const $I_SET_TRANSFERRER_ARGS = Symbol('.$setTransferrerArgs()');
@@ -29,6 +30,7 @@ const $I_PRUNE = Symbol('.$prune()');
 const $I_DEGRADE = Symbol('.$degrade()');
 
 export const $I = deepFreeze({
+  STASH_BYTE_LIMIT: $I_STASH_BYTE_LIMIT,
   REGISTRY: $I_REGISTRY,
   TRANSFERRER: $I_TRANSFERRER,
   SET_TRANSFERRER_ARGS: $I_SET_TRANSFERRER_ARGS,
@@ -36,10 +38,8 @@ export const $I = deepFreeze({
   DEGRADE: $I_DEGRADE,
 });
 
-const S_STASH_BYTE_LIMIT = Symbol('._stashByteLimit()');
 const S_DEGRADED_CHUNK_READER_CTOR = Symbol('._degradedChunkReaderCtor');
 
 export const _S = deepFreeze({
-  STASH_BYTE_LIMIT: S_STASH_BYTE_LIMIT,
   DEGRADED_CHUNK_READER_CTOR: S_DEGRADED_CHUNK_READER_CTOR,
 });
