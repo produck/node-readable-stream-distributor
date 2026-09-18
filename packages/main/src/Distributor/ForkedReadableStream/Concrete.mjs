@@ -1,5 +1,5 @@
 import * as ChunkReader from '../ChunkReader/index.mjs';
-import { I, $I } from './Symbol.mjs';
+import { I, $I, DISTRIBUTOR } from './Symbol.mjs';
 
 export default class ForkedReadableStream extends ReadableStream {
   [I.LABEL];
@@ -13,6 +13,8 @@ export default class ForkedReadableStream extends ReadableStream {
 
   constructor(distributor, bufferChunkReader, label) {
     let _controller;
+    const registry =
+      distributor[DISTRIBUTOR.$I.FORKED_READABLE_STREAM_REGISTRY];
 
     super({
       start: (controller) => {
@@ -33,6 +35,7 @@ export default class ForkedReadableStream extends ReadableStream {
         if (result.done) {
           this[I.DONE] = true;
           controller.close();
+          registry.prune(this);
 
           return;
         }
@@ -45,6 +48,7 @@ export default class ForkedReadableStream extends ReadableStream {
         }
 
         this[$I.CANCELLED] = true;
+        registry.prune(this);
       },
     });
 

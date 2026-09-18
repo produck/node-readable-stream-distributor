@@ -23,3 +23,5 @@ export const $I = deepFreeze({
   CHUNK_READER: $I_CHUNK_READER,
   SET_DEGRADED_CHUNK_READER: $I_SET_DEGRADED_CHUNK_READER,
 });
+
+export * as DISTRIBUTOR from '../Symbol.mjs';

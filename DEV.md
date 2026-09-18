@@ -66,8 +66,9 @@
   相位事实）；`destroy()` 为 TODO。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
   `ChunkStash`）· `$I.STASH_BYTE_LIMIT`（阈值，构造器唯一写入）·
-  `I.SOURCE_CONSUMPTION_AGENT`（消费代理）· `$I.REGISTRY`（fork 集，
-  `$I.PRUNE` 清理已取消 fork）· `I.CTOR`（捕获的自身类）· 两个类值
+  `I.SOURCE_CONSUMPTION_AGENT`（消费代理）·
+  `$I.FORKED_READABLE_STREAM_REGISTRY`
+  （fork 注册表，fork 出口自清理也要读）· `I.CTOR`（捕获的自身类）· 两个类值
   getter `I.DEGRADED_CHUNK_READER_CTOR` / `I.TRANSFERRER_CTOR`，以及当前
   相位字段 `I.CURRENT_CHUNK_READER_CTOR`（初值 `BufferChunkReader`，降级
   换读器时置为前者）。受保护侧另有写侧实例与其待用构造参数：`$I.TRANSFERRER` /
@@ -284,9 +285,27 @@
 
 - `extends ReadableStream`；`get $I.CHUNK_READER` 读当前读器，
   `$I.SET_DEGRADED_CHUNK_READER(reader)` 是唯一的换入口（降级时用，只此
-  一次）；`$I.CANCELLED` 供 `$I.PRUNE`。
+  一次）；`$I.CANCELLED` 供 `pull` 早退与 `cancel` 幂等。
 - `start` 在 `super()` 内同步执行（TDZ）：用局部变量捕获 controller，
   `super()` 后桥入 `I.CONTROLLER`；`pull` / `cancel` 异步可安全用 `this`。
+- **两个出口自己出表**：注册表不在自己身上，出口时经
+  `I.DISTRIBUTOR` + 分发器的受保护符号
+  `$I.FORKED_READABLE_STREAM_REGISTRY` 取到；读到尾
+  （`pull` 收到 `done`）与被 `cancel` 时各调一次 `prune(this)`。
+
+### ForkedReadableStreamRegistry（fork 注册表）
+
+- 内部协作类，与 `SourceConsumptionAgent` 同路：平铺字段、普通方法名，
+  不带符号表；由分发器构造并持有在受保护字段
+  `$I.FORKED_READABLE_STREAM_REGISTRY`（fork 出口自清理要读它，故不能私有）。
+- `forks`：活体集（`Set<ForkedReadableStream>`）；`add(fork)` 入册；
+  可 `for...of` 遍历——`$I.DEGRADE` 与将来的 `destroy()` 都走它。
+- `prune(fork)`：单个出表，**由 fork 自己在两个出口调用**（读到尾、被
+  cancel）——出口只有 fork 自己知道，所以这里是自清理而非扫表。
+- **不变量：成员资格 = 降级交接名单**。表只有一条义务——降级那一刻
+  还读得动的成员一个都不能漏。故出表只能由 fork 自己在出口发起，
+  **不存在扫描式清理**：残留的读不动的成员（例如源报错之后）既不会被
+  交接，也不会被谁读到，只按体积计费。
 
 ## 术语
 
@@ -379,3 +398,30 @@
 - 实测（`logs/probe-gate.mjs`）：入队即放行；按号放行（号 2 要等第三块）；
   dump 在途不放行、落地即放行；`SET_DONE` 放行"永不会有块"的等待者；
   `FAIL` 以原因拒绝等待者与后来者。三个既有探针输出不变。
+
+### 2026-09-18 — 注册表：成员资格就是降级交接名单
+
+- 角色收敛：`ForkedReadableStreamRegistry` 不是"活体统计"，而是**降级
+  交接名单**——`$I.DEGRADE` 靠遍历它给每个拷贝换读器、播种位置。由此
+  得出唯一义务：降级那一刻还读得动的成员，一个都不能漏；出表只能由
+  fork 自己在出口（读到尾 / 被 cancel）发起。
+- 结论：**删除扫描式清理**（原 `pruneAll()`：按 `$I.CANCELLED` 重扫）。
+  它任意时刻调用都扫不到东西——`$I.CANCELLED` 只在 `cancel` 里置位，
+  紧跟着同一同步块就 `prune(this)`，判据与出表共线。
+- 为何"误清"不能忍：注册表不只是登记簿——漏掉交接的 fork 会留着
+  `BufferChunkReader`，而降级同时已把 stash `DROP`。于是它要么抛
+  `ChunkStash has been dropped`，要么在源已尽那一支静默 `done: true`
+  截断。判据不准的"多扫几遍"是往正确性上开洞，不是清理。
+- 源报错留下的尸体不构成缺口：降级触发点唯一（`toStash`，`degraded`
+  置位后至多一次），且只在消费成功的 `pull()` 里可达；源报错后消费
+  路径永久停止，故再无降级会鞭到那些尸体——只占内存。
+- 代价（记录在案）：表到 fork 的强引用，加上 fork 的 `I.DISTRIBUTOR`
+  回引，构成双向强引用——只要消费者还握着任一 fork，整条图（源读器、
+  stash 及其字节、源流）都不可回收。"最后一个 fork 被丢弃"是分发器
+  可回收的前提。
+- 顺带：fork 取注册表改经分发器的受保护符号（见上方
+  `$I.FORKED_READABLE_STREAM_REGISTRY`），并在构造器闭包里捕获；于是
+  fork 不再持有注册表字段与私有符号。内部类用父级符号的办法是**由本级
+  的 `Symbol.mjs` 转发父级表**（`export * as DISTRIBUTOR from '../Symbol.mjs'`）
+  ——避免让 `Symbol.mjs` 变成非叶子（那正是此前模块环的成因）。环检查
+  脚本（`logs/check-import-cycles.mjs`）：29 个模块，强连通分量 0。

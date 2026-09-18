@@ -23,18 +23,18 @@ export const I = deepFreeze({
 });
 
 const $I_STASH_BYTE_LIMIT = Symbol('.$stashByteLimit');
-const $I_REGISTRY = Symbol('.$registry');
+const $I_FORKED_READABLE_STREAM_REGISTRY = Symbol(
+  '.$forkedReadableStreamRegistry',
+);
 const $I_TRANSFERRER = Symbol('.$transferrer');
 const $I_SET_TRANSFERRER_ARGS = Symbol('.$setTransferrerArgs()');
-const $I_PRUNE = Symbol('.$prune()');
 const $I_DEGRADE = Symbol('.$degrade()');
 
 export const $I = deepFreeze({
   STASH_BYTE_LIMIT: $I_STASH_BYTE_LIMIT,
-  REGISTRY: $I_REGISTRY,
+  FORKED_READABLE_STREAM_REGISTRY: $I_FORKED_READABLE_STREAM_REGISTRY,
   TRANSFERRER: $I_TRANSFERRER,
   SET_TRANSFERRER_ARGS: $I_SET_TRANSFERRER_ARGS,
-  PRUNE: $I_PRUNE,
   DEGRADE: $I_DEGRADE,
 });
 

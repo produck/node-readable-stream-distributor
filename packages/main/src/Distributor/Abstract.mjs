@@ -10,6 +10,7 @@ import * as ChunkReader from './ChunkReader/index.mjs';
 import * as ChunkStash from './ChunkStash/index.mjs';
 import * as SourceReader from './SourceReader/index.mjs';
 import SourceConsumptionAgent from './SourceConsumptionAgent.mjs';
+import ForkedReadableStreamRegistry from './ForkedReadableStreamRegistry.mjs';
 import { isReadableStreamLike } from './Checker.mjs';
 import { I, $I, _S } from './Symbol.mjs';
 import * as Parser from './Parser.mjs';
@@ -23,7 +24,7 @@ class ReadableStreamDistributor extends EventTarget {
   [$I.STASH_BYTE_LIMIT];
   [I.TRANSFERRER_ARGS] = [];
   [$I.TRANSFERRER] = null;
-  [$I.REGISTRY] = new Set();
+  [$I.FORKED_READABLE_STREAM_REGISTRY] = new ForkedReadableStreamRegistry();
 
   constructor(source, stashByteLimit = 1024 ** 3) {
     super();
@@ -54,6 +55,7 @@ class ReadableStreamDistributor extends EventTarget {
     const agent = this[I.SOURCE_CONSUMPTION_AGENT];
     const stash = this[I.CHUNK_STASH];
     const transferrer = this[$I.TRANSFERRER];
+    const registry = this[$I.FORKED_READABLE_STREAM_REGISTRY];
     const ChunkReaderImpl = this[I.CURRENT_CHUNK_READER_CTOR];
     const chunkReader = new ChunkReaderImpl(agent, stash, transferrer);
 
@@ -63,20 +65,10 @@ class ReadableStreamDistributor extends EventTarget {
 
     const forked = new ForkedReadableStream.Concrete(this, chunkReader, label);
 
-    this[$I.REGISTRY].add(forked);
+    registry.add(forked);
     this.dispatchEvent(new Event.Fork(forked));
 
     return forked;
-  }
-
-  // TODO: nothing calls this yet — the trigger (cancel notification vs fork /
-  //   destroy) is TBD.
-  [$I.PRUNE]() {
-    for (const forked of this[$I.REGISTRY]) {
-      if (forked[ForkedReadableStream.$I.CANCELLED]) {
-        this[$I.REGISTRY].delete(forked);
-      }
-    }
   }
 
   [$I.SET_TRANSFERRER_ARGS](...args) {
@@ -115,7 +107,7 @@ class ReadableStreamDistributor extends EventTarget {
     this[$I.TRANSFERRER] = transferrer;
     this[I.CURRENT_CHUNK_READER_CTOR] = DegradedChunkReaderImpl;
 
-    for (const forked of this[$I.REGISTRY]) {
+    for (const forked of this[$I.FORKED_READABLE_STREAM_REGISTRY]) {
       const reader = new DegradedChunkReaderImpl(agent, stash, transferrer);
       const bufferChunkReader = forked[ForkedReadableStream.$I.CHUNK_READER];
       const progress = bufferChunkReader[ChunkReader.$I.CONSUMED_CHUNK_COUNT];
