@@ -45,3 +45,9 @@ export const _I = deepFreeze({
   DUMP: _I_DUMP,
   WRITE: _I_WRITE,
 });
+
+export const A = deepFreeze({
+  I: {
+    WRITTEN_COUNT: I_WRITTEN_CHUNK_COUNT,
+  },
+});

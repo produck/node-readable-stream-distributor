@@ -1,8 +1,8 @@
 export default class ForkedReadableStreamRegistry {
-  forks = new Set();
+  forks = new Map();
 
-  add(fork) {
-    this.forks.add(fork);
+  add(fork, controller) {
+    this.forks.set(fork, controller);
   }
 
   prune(fork) {

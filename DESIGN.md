@@ -71,11 +71,10 @@ reader.cancel();
 // 关闸门（框架层策略执行：body 超限、请求超时、客户端断开等）
 // → 不再接受新 fork（再 fork() 抛错）；已建拷贝照旧运行
 // → 需要数据就继续向源拉取，直到源自己到头（read() 收 {done: true}）
-// 切断源 + 封口（前沿定长），让已建拷贝各自读到前沿自然收尾：
-//    无带外 poke、无 abort——拷贝拿到的是自己的缓冲区 + 一次 close()
-// → 截断对读侧不可见（下游分不清“传输完整”与“被宿主切断”）；
-//    宿主侧可监听 terminate 事件自行告知下游
-// → stash 与介质的释放：见「引用计数生命周期」（未实现）
+// 切断源 + 封口（前沿定长）+ 当场结束所有拷贝：
+//    每个活体立刻 error(AbortError)，不补已缓冲的前缀
+// → terminate 对读侧不可见，destroy 当场可辨（下游看 error.name）
+// → stash 与介质的释放：见「引用计数生命周期」（机械未齐）
 distributor.terminate();
 distributor.destroy();
 ```
@@ -178,7 +177,7 @@ classDiagram
     }
 
     class ForkedReadableStream {
-        +distributor
+        <<ReadableStream>>
     }
 
     class AbstractChunkReader {
@@ -255,7 +254,7 @@ classDiagram
   （如 `ChunkReader/` = `AbstractChunkReader`）；继承它的子类，其目录
   与抽象类的类目录**平行**——同一父目录下的兄弟层级，而非在其内部
   向下扩展。子类目录内部按模块模式组织（`Abstract.mjs` / `Concrete.mjs`
-  - `index.mjs` + `Symbol.mjs`）。
+  - `index.mjs` + `_Symbol.mjs` + `_External.mjs`）；
 - **唯一特例：极端简化单文件**。无子类、无专属符号、无需独立导出
   入口的实现，可用单文件模式不建目录，平铺在与抽象类类目录平行的
   位置，文件名即类名。当前有 `BufferChunkReader`、
@@ -270,19 +269,20 @@ Distributor/
   ChunkReader/          # AbstractChunkReader（抽象类类目录）
     Abstract.mjs
     index.mjs
-    Symbol.mjs
+    _Symbol.mjs
   DegradedChunkReader/  # 降级家族：AbstractDegradedChunkReader（纯读抽象，与 ChunkReader/ 平行）
     Abstract.mjs
     Transferrer/        # AbstractTransferrer（家族内部抽象：写侧 dump/write）
       Abstract.mjs
       index.mjs
-      Symbol.mjs
+      _Symbol.mjs
     index.mjs
-    Symbol.mjs
+    _Symbol.mjs
+    _External.mjs
   TemporaryFile/        # （未来）TemporaryFileChunkReader（子类，与 DegradedChunkReader/ 平行）
     Concrete.mjs
     index.mjs
-    Symbol.mjs
+    _Symbol.mjs
   ChunkStash/           # 内部类（向下扩展）
   ForkedReadableStream/ # 内部类（向下扩展）
 ```
@@ -527,11 +527,12 @@ sequenceDiagram
 任一拷贝 cancel 不影响其他。最后一个拷贝离开时源头
 才被释放。这就是"全停则全停"。
 
-**未实现**：表空时的自动收尾还没有触发路径——fork 只在出口把
-自己摘出注册表，没人监听"表空了"。现在的两个显式动作都不释放资源：
-`terminate()` 只关闸门；`destroy()` 封口 + 切断源，但**不**释放 stash
-与介质——未读的拷贝还要读完那段缓冲，释放得等最后一个拷贝结束（即
-上面这条引用计数路径）。在被遗弃的拷贝上，这意味着前缀活到 GC。
+**未实现**：`destroy()` 已经把每个拷贝当场结束并让它出表，所以释
+放不再需要引用计数——差的是两件机械：读侧没有统一的 close 动词
+（降级族有 `$I.CLOSE`，今天无调用者；内存族无资源、应有空实现），
+写侧没有释放口（transferrer 的关闭）。这两件补齐后，`destroy()` 就能
+当场释放 stash 与介质；在那之前，被销毁的分发器把它们留到 GC。
+`terminate()` 则什么也不释放（它只关闸门）。
 
 ## 背压
 
@@ -593,9 +594,9 @@ sequenceDiagram
   ——意外终止
 - **`terminate()`**：拷贝**感觉不到**。它只关闸门（不再接受新 fork），
   已建拷贝照旧运行——需要数据就继续向源拉取
-- **`destroy()`**：闸门 + 封口（前沿定长）+ 切断源。拷贝读到前沿时
-  同样是 `close()`——截断**不**对下游可见（下游分不清“传输完整”与
-  “被宿主切断”）；要分辨只能靠宿主侧监听 `terminate` 事件
+- **`destroy()`**：闸门 + 封口（前沿定长）+ 切断源 + **当场结束所有
+  拷贝**。每个活体立刻收到 `error(终止原因)`——可辨识的 `AbortError`，
+  **不补**已缓冲的前缀（分级：`terminate` 对读侧不可见，`destroy` 当场可辨）
 
 不管哪种收场，每个拷贝拿到的始终是连续完整前缀（不会跳号、不会缺
 中间块），且“来晚了”的拷贝也能利用已缓冲数据完成部分工作。

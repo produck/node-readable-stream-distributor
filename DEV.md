@@ -19,11 +19,28 @@
 
 ### Symbol 约定
 
+- **三个维度**（总纲）：**原始含义**（`_Symbol.mjs` 里
+  `Symbol('.#…')` / `'.$…'` 的定义，唯一事实，引用绕不过它）·
+  **便捷形式**（同文件导出的 `A`，纯派生：删掉别名或某个键，语义层不动）·
+  **引用关系**（`_External.mjs` 转发并导出 `_A`，图是 DAG，
+  `_Symbol.mjs` 是叶子）。
+- 一个符号走完全程（以读器位置为例）：定义在 `ChunkReader/_Symbol.mjs`
+  的 `Symbol('.$consumedChunkCount')` → 原始 `this[$I.CONSUMED_CHUNK_COUNT]`
+  → 便捷 `this[A.$I.CONSUMED_COUNT]`（自己的 `A`）→ 跨模块
+  `this[_A.READER.A.$I.CONSUMED_COUNT]`（借表 + 它自己的别名：
+  `_A.READER` 说明“这是谁的”，`.A.$I.…` 说明“它叫什么”）。
+- 别名的**本地性**：键名由各模块自理，同名可为不同物（`ForkedReadableStream`
+  的 `A.I.READER` 是字段，`BufferChunkReader` 的 `_A.READER` 是表）。约定
+  “只从自己的 `./_Symbol.mjs` / `./_External.mjs` 取，惯用 `A` / `_A`
+  两个名字”——于是读一个文件的头部 import，就知道每个别名归谁。
+- 唯一的代价（不会自己守住）：**键名是两份账**——底层键改名时别名键
+  不会跟着动，而别名仍能引用到旧符号。所以改名要两边一起改。
 - 层级：`I`/`S` = 实例/静态私有；`$I`/`$S` = 受保护；`_I`/`_S` = 抽象。
 - 方法符号带 `()` 后缀（`.$read()`、`._seek()`）；字段符号不带
   （`.$consumedChunkCount`）；描述符：实例 `.#*` / `.$*` / `._*`，静态 `S.*`。
-- `index.mjs` 只导出受保护/抽象空间（`$I`/`$S`/`_I`/`_S`），**严格不导出
-  私有 `I`/`S`**。
+- `index.mjs` **只导出类**（`Concrete` / `Abstract`；降级家族再带
+  `Transferrer` 命名空间），**不导出任何符号表**——符号只走
+  `_Symbol.mjs` / `_External.mjs` 这条路径。
 - 模块路径即命名空间——跨模块同词不冲突（降级 `_I.READ` 与基类 `_I.READ`
   各自独立）；符号表的键数不设上限。
 - 面向调用者的具名成员（如 `get dumping` / `get done`）用普通字符串键。
@@ -31,6 +48,39 @@
   以 `_CTOR` 结尾**（`_S.DEGRADED_CHUNK_READER_CTOR` /
   `_S.TRANSFERRER_CTOR`）。组织级共享符号集（待建）收编这类通用含义的
   键，避免每个模块重复声明。
+- **两个表文件分工**：`_Symbol.mjs` 只定义自己的表（纯叶子，不引用任
+  何东西）并出别名 `A`；对外的表单独放 `_External.mjs`，在那里导入并
+  转发（`export * as CHUNK_READER from '../ChunkReader/_Symbol.mjs'`），
+  并出别名 `_A`。现转发：`ForkedReadableStream` →`DISTRIBUTOR`+
+  `CHUNK_READER`；`BufferChunkReader` →`CHUNK_READER`；降级族 →
+  `TRANSFERRER`+`CHUNK_READER`；写侧 →`CHUNK_STASH`。
+- **两个别名各管一摊**：`A`（自己的符号，在 `_Symbol.mjs`）——长键的
+  短名（`A.I.AGENT` / `A.$I.CONSUMED_COUNT` / `A.I.CTOR.READER.CURRENT`…）；
+  `_A`（借来的表，在 `_External.mjs`）——`_A.STASH` / `_A.READER` /
+  `_A.BUFFER` / `_A.DEGRADED` / `_A.FORKED`。消费侧一眼分出“我的符号”与
+  “外面借的”。
+- **别名在定义处也套**：键开了就用（`ChunkReader/Abstract.mjs` 自己就写
+  `A.$I.CONSUMED_COUNT`）。没开键的长名可以随手开一个，判据是**键名长短 ×
+  消费点数量**（短名开别名反而更长，见下条）。
+- **现存键集**（`A`）：`Distributor`——`I.{STASH,AGENT,SOURCE}`、
+  `I.CTOR.{TRANSFERRER,READER.{DEGRADED,CURRENT}}`、`$I.{LIMIT,REGISTRY}`；
+  `ChunkReader`——`I.AGENT`、`$I.{CONSUMED_COUNT,STASH}`；
+  `DegradedChunkReader`——`I.SEEKED_COUNT`；`Transferrer`——`I.WRITTEN_COUNT`；
+  `ForkedReadableStream`——`I.READER`、`$I.READER`。
+- **现存 `_A`**：`Distributor`——`{STASH,READER,BUFFER,DEGRADED,FORKED}`；
+  `BufferChunkReader` / `DegradedChunkReader` / `ForkedReadableStream`——
+  `{READER}`；`Transferrer`——`{STASH}`。
+- **别名只给“直接子表 + 本模块自己的符号”**：家族的内部下级表不设别名，
+  按名从 `_External.mjs` 导入即可（写侧 `TRANSFERRER.$I.DUMP`——名字本身
+  已经够短，套一层别名只是多一层）。
+- **局部别名 vs 内联**：一行放不下时起局部别名
+  （`const stash = this[A.I.STASH]`）而不是自行折行；但**实参位置别内联**
+  ——把一个 `this[…]` 拼进多参调用里，prettier 会把实参逐行展开，反而
+  多占行、也更难读。判据：内联后整行仍 ≤80 列才收（`printWidth`）。
+- 环检查 `logs/check-import-cycles.mjs`：34 个模块，强连通分量 0。
+  拆表之前存过一个二元回边（别名表读子表 + 子表向上借父表）；
+  拆开后“向上借”落在 `_External.mjs` 这条叶子上，`_Symbol.mjs` 只定义
+  不引用，环自然消失。
 
 ### 受保护实例字段与静态钩子（`_S`）
 
@@ -50,7 +100,8 @@
 ### 目录约定
 
 - 一目录一类：主类文件 `Abstract.mjs`/`Concrete.mjs`（存在性互斥）+
-  `index.mjs` + `Symbol.mjs`；目录路径即命名空间。
+  `index.mjs` + `_Symbol.mjs`（借用外部表时再多一个 `_External.mjs`）；
+  目录路径即命名空间。
 - **子类目录平行于抽象类类目录**（兄弟层级）；向下扩展仅限非继承的
   内部类（如 `DegradedChunkReader/Transferrer/`）。
 - 介质侧实现极端简化可用单文件特例（如 `Distributor/BufferChunkReader.mjs`）。
@@ -89,21 +140,47 @@
   `$I.TERMINATION`（`DOMException`，`name` 为 `AbortError`）；派
   `terminate` 事件。**它只关闸门**：此后 `fork()` 抛错，除此外什么都不动——
   不封口、不取消源、不碰任何已建 fork。已建 fork 照常运行：需要数据就
-  继续向源拉取，直到源自己到头（`close()`）。消费代理的 `ensure()` /
-  `pull()` 都不认识这个状态（判据是“源还能用吗”与“落点封口了吗”）。
-- **两个动作的语义分层**：`terminate()` = 只关**闸门**（拒新 fork）；
-  `destroy()` = 闸门 + **封口**（前沿定长）+ **切断源**，已建拷贝各自读到
-  前沿自然收尾（`close()`，不突袭）。命名与状态同名（`terminate` /
-  `$I.TERMINATION` / `get terminated`），把“谁关闸门、谁封口”写在名字上。
+  继续向源拉取，直到源自己到头（`close()`）。消费代理不认识这个状态：
+  它的循环只问“源还能不能拉”。
+- **两个动作的语义分层**：`terminate()` = 只关**闸门**（拒新 fork，
+  已建拷贝照旧运行）；`destroy()` = 闸门 + **封口**（前沿定长）+ **切断源**
+  - **当场结束所有拷贝**（`error(终止原因)`，不补缓冲）。读侧观感：
+    `terminate` 对拷贝不可见，`destroy` 立刻给出可辨识的 `AbortError`。
 - **`destroy()` 骨架**：`terminate()` → 按相位封口（`$I.TRANSFERRER` 为
   `null` 就是 stash `$I.SET_DONE`，否则是 transferrer `$I.SET_DONE`）
-  → `SOURCE_READER.cancel(终止原因)`（不 await；失败只派
-  `warn('source-cancel-failed')`）。它自己**不持状态**：三步各自幂等
-  （`terminate` 有守卫、封口是置位、cancel 有守卫），所以二次 `destroy()`
-  天然无害，也就不需要第二个“已摧毁”标志。**不** abort 拷贝、**不**清表、
-  **不** `$I.DROP()`：封口之后前沿已定，未读的拷贝还要接着读那段缓冲，
-  清表/释放都会把它们打断。未做：引用计数——最后一个拷贝结束才释放
-  stash 与介质（写侧还没有关闭口）。
+  → **遍历注册表当场结束每个拷贝**（`controller.error(终止原因)` +
+  `prune`，不补已缓冲的前缀）→ `SOURCE_READER.cancel(终止原因)`（不
+  await；失败只派 `warn('source-cancel-failed')`）。四步各自幂等
+  （`terminate` 有守卫、封口是置位、对已 errored 的流再 error 是规范
+  no-op、cancel 有守卫），所以二次 `destroy()` 天然无害。**不**清表、
+  **不** `$I.DROP()`：出表是逐个 `prune`（与 fork 自己两个出口同一形态，
+  这里是宿主代拷贝收场）。**未做**：读侧统一 close 动词与介质释放
+  ——`destroy()` 已经把拷贝全结束，所以这两件不再需要引用计数。
+
+### SourceConsumptionAgent（消费代理）
+
+- 角色：**唯一的源消费方**（`pulling` 单飞，所有等待者共享同一趟拉取）
+  与**唯一的落点写入者**——“源的事实”经它交给落点。降级的**触发**也在
+  这里（stash 字节超阈值 → `$I.SEAL()` + `degraded = true` →
+  `distributor.$I.DEGRADE()`；执行仍在结构侧，见 Distributor 一节）。
+- `ensure(target)` 契约：返回时目标位置已可读，或落点已封口；源报错则
+  拒绝；内部发生的切换已落地。
+  - 循环只认一个判据：`!sourceReader.finished`（源还能不能拉）。
+  - 收尾那句“源已终而仍有在途 pull 就等它”是**前缀一致性的来源**：
+    任何拷贝读之前都排在同一个在途 pull 后面，于是封口时还在路上的那一
+    笔对谁都可见、顺序也一致（两相位均实测）。
+- `pull()`：`read()` → 按相位写落点（`toStash` / `toTransferrer`）→
+  非终态才 `pulledChunkCount++`（计数只在这里做一次：每个等待者 join
+  的都是这一趟）。它**不看**任何封口/终止状态；封口后仍在路上的那一笔
+  照常入落点，不丢。
+- 两条陷阱（留档，改这里之前先读）：
+  - 循环在没有封口的情况下提前停 → 读侧拿
+    `{ done: false, value: undefined }` 无限空转。
+  - 在 `pull()` 里“作废已拉回的一笔” → `pulledChunkCount` 不前进、循环
+    条件永远成立 → 把源一路抽干、每笔都丢掉、读侧永不返回。
+- `finished` 的由来：`SourceReader.READ` 在 `CANCELLED` 之后**不再写
+  `DONE`**，而 `read()` 一进门就短路答 `{done:true}`——只看 `done` 的
+  循环会对着已收摊的源每圈 `SET_DONE` 一次。
 
 ### SourceReader（分发器侧拉取装置）
 
@@ -227,11 +304,9 @@
   `I.INITIALIZED`（链：open + 进度同步）→ `I.SYNC()` 补差 → 转发自家
   `_I.READ`，非终态把 `I.SEEKED_CHUNK_COUNT` 推进一格。基类驱动对降级实例
   天然成立；介质侧只见降级 `_I` 空间。
-- **终止后不再拉取**：`ensure()` 的循环与收尾都认
-  分发器的 `$I.TERMINATION`（软档不取消源，所以不能拿
-  `sourceReader.cancelled` 当判据）；另外 `pull()` 在读到数据后会复查一次
-  终止状态，**把在途那一笔作废**——不取消源就意味着那一笔会带着真实数据
-  回来，不然前沿会被它推迟一格，前缀长度变成时序依赖。
+- 门的语义是**接受度**：该位在介质上或在队列里就算可读，"到头"也算
+  可读（介质侧回终态）。它**不等整份 dump**——实测 dump 30ms 在途时新建
+  fork 首读 1ms，整条 20 块的流只碰介质 1 次。
 - 门的语义是**接受度**：该位在介质上或在队列里就算可读，"到头"也算
   可读（介质侧回终态）。它**不等整份 dump**——实测 dump 30ms 在途时新建
   fork 首读 1ms，整条 20 块的流只碰介质 1 次。
@@ -295,6 +370,15 @@
   恒定，放行不了任何人；门收不到介质进度，也就不可能让它参与可读性。
 - **可读 = 被接受**：在介质上或在队列里都算。介质的进度只决定"从哪儿
   取"（队列 or 介质侧），不决定"能不能取"。
+- **积压策略（2026-09-16 定）**：队列**不设上限、不做闸门**。写**挂住**
+  不闩错（继续积压，撑多久由宿主内存与分发器生命周期决定），写**报错**
+  才闩 `I.ERROR`，此后所有读拒绝。积压只观察，计数不外露。
+- **门的成本（记录）**：过门 445–483ns/笔，对"命中即返回"153ns（整条读
+  路径 ~3.0µs 对 ~2.6µs，约 −15%；promise 构造本身约 20ns）。为这 15%
+  把判据落成两处、并把 `I.ERROR` 检查搬进命中路径，不划算，故保持
+  "判据只写一处"。终局也不单列分支：放行写成单循环
+  `position < 水位 + 队列 || isTerminal`，一处 `delete` + `resolve`，
+  让"放行点只有一处"一眼可见。`I.SETTLE` 首行空表早返回。
 - **纯内部对象**：实例由分发器私有持有，**不开观察面**——要看就进
   调试器按符号表读成员（`I.PENDING_CHUNKS` / `I.WRITTEN_CHUNK_COUNT` /
   `I.PENDING_RELEASES` / `I.DRAINING` / `I.DONE` / `I.ERROR` /
@@ -316,10 +400,15 @@
 - `extends ReadableStream`；`get $I.CHUNK_READER` 读当前读器，
   `$I.SET_DEGRADED_CHUNK_READER(reader)` 是唯一的换入口（降级时用，只此
   一次）；`$I.CANCELLED` 供 `pull` 早退与 `cancel` 幂等。
-- **两个出口自己出表**：注册表不在自己身上，出口时经
-  `I.DISTRIBUTOR` + 分发器的受保护符号
-  `$I.FORKED_READABLE_STREAM_REGISTRY` 取到；读到尾
-  （`pull` 收到 `done`）与被 `cancel` 时各调一次 `prune(this)`。
+- `start` 钩子只做一件事：把 controller 交给构造器局部变量，供入册用
+  ——**不落字段**，controller 的唯一持有者是注册表。
+- **两个出口自己出表**：注册表在构造器闭包里捕获一次（经分发器的
+  受保护符号 `$I.FORKED_READABLE_STREAM_REGISTRY` 取，不落自己的字段）；
+  读到尾（`pull` 收到 `done`）与被 `cancel` 时各调一次 `prune(this)`。
+- **不暴露自己的分发器**：没有 `get distributor`——控制权不外溢。要形成
+  级联就 `new Distributor(fork)`（把拷贝当源再造一个次级分发器），而不是
+  让下游从拷贝摸回宿主。（`I.DISTRIBUTOR` 字段与符号键随之删掉：唯一读者
+  就是那个 getter，注册表又已在构造器闭包里捕获。）
 - **读到尾一律 `controller.close()`**：没有带外 poke，也就没有
   “把 close 换成 error”那个分叉；源报错走 read 拒绝，流自然 error。
 
@@ -328,16 +417,27 @@
 - 内部协作类，与 `SourceConsumptionAgent` 同路：平铺字段、普通方法名，
   不带符号表；由分发器构造并持有在受保护字段
   `$I.FORKED_READABLE_STREAM_REGISTRY`（fork 出口自清理要读它，故不能私有）。
-- `forks`：活体集（`Set<ForkedReadableStream>`）；`add(fork)` 入册；
-  可 `for...of` 遍历——只有降级换读器走它（销毁不走：已建 fork 自决
-  生命周期，分发器不伸手）。
-- `prune(fork)`：单个出表，**由 fork 自己在两个出口调用**（读到尾、被
-  cancel）——出口只有 fork 自己知道，所以这里是自清理而非扫表。
+- `forks`：`Map<ForkedReadableStream, ReadableStreamDefaultController>`
+  ——宿主对每个拷贝的账：成员 + 结束它所需的那根操作杆。
+  `add(fork, controller)` 入册，**由 fork 自己在构造器体里登记**：
+  `start` 钩子在 `super()` 期间跑，那时派生类还没有 `this`，所以
+  controller 先落构造器局部变量，`super()` 返回后再连同 `this` 一起入册
+  （controller 因此不落 fork 的字段，唯一持有者是注册表）。
+  `for...of` 产出 `[fork, controller]` 条目——降级换读器解构第一个，
+  强制档两个都要。
+- `prune(fork)`：单个出表，**两个出口由 fork 自己调用**（读到尾、被
+  cancel）——出口只有 fork 自己知道，所以这里是自清理而非扫表；
+  **第三个出表点是强制档**：宿主代拷贝收场，所以那里由宿主 prune。
 - **不变量：成员资格 = 降级交接名单**。表只有一条义务——降级那一刻
   还读得动的成员一个都不能漏。故出表只能由 fork 自己在出口发起，
   **不存在扫描式清理**：残留的读不动的成员（例如源报错之后）既不会被
-  交接，也不会被谁读到，只按体积计费。`destroy()` 之后同理：封口已定，
-  未读的拷贝还要读到前沿，谁也不能替它们出表。
+  交接，也不会被谁读到，只按体积计费。`destroy()` 是第三个出表点：
+  它当场结束每个拷贝并逐个 prune——那是“宿主代拷贝收场”，与
+  “出口只有 fork 自己知道”不矛盾。
+- **代价（记录在案）**：表到 fork 的强引用，加上 fork 的 `I.DISTRIBUTOR`
+  回引，构成双向强引用——只要消费者还握着任一 fork，整条图（源读器、
+  stash 及其字节、源流）都不可回收。“最后一个 fork 被丢弃”是分发器
+  可回收的前提。
 
 ## 术语
 
@@ -355,6 +455,10 @@
 > 不稳定、演进中的决策先在此按时间（`### YYYY-MM-DD`）追加，保留
 > 来龙去脉；一旦收敛为确定结论，不定期执行"结论压缩"——并入上方
 > 对应主题的"当前有效结论"，并从本节移除。
+>
+> 最近一次压缩：2026-09-19——09-16 积压策略、09-17 位置门、09-18 注册表、
+> 09-18/09-19 两档生命周期（terminate 关闸门 / destroy 封口切断源）
+> 已并入上方主题。
 
 ### 2026-09-09 — 定位与生命周期收敛（已压缩入上方，留作示例）
 
@@ -377,180 +481,4 @@
 - 待收敛（当时）：前沿信号形态、`$I.READ` 的等待方式，以及它与共享
   取块层"确保可用"的衔接。
 
-现结论见上方：「读路径」/「消费前沿与 done」。
-
-### 2026-09-16 — 积压只观察、不设限
-
-- 结论：积压（`PENDING_CHUNKS`）**不设上限、不做背压闸门**。介质挂住
-  （NFS 断网这类）期间读侧继续由队列交付，能跑就跑；撑多久由宿主的
-  内存容量与分发器生命周期决定。
-- 与"失败是业务宕机"的分工：写**挂住**不闩错、继续积压；写**报错**
-  才闩 `I.ERROR`，之后所有读拒绝。
-- 观察不外露：transferrer 是纯内部对象（调试看符号即可），所以只写
-  不读的计数（积压字节数）以及 `get pendingChunkCount` /
-  `get writtenChunkCount` 一并撤掉；积压本身不设上限、不做闸门。
-- 据此作废 `SourceConsumptionAgent.ensure` 里"缓冲满了就暂停拉取"的
-  背压 TODO，改挂观察 TODO。
-
-### 2026-09-17 — 位置门：广播改为等待者登记表
-
-- 现象：原实现是"广播 + 各自重判"——`I.PROGRESS` 存一代 resolver，
-  `I.ADVANCE(writtenChunkCount)` 换新代并 resolve 旧代；等待者在
-  `while` 里反复重算 `position < 水位 + 队列`。两处别扭：`I.FAIL` 与
-  `$I.SET_DONE` 得"把原数传回去假装前进"才能发布；drain 每写一块发一次
-  广播，而"队列 -1、水位 +1"对 `total` 恒定，那次唤醒对等待者不可观测
-  （空唤醒）。真正改变 `total` 的入队处反倒不发信号，靠 drain 顺手那发
-  兜住。
-- 结论：改为等待者登记表（`I.PENDING_RELEASES`，`Map<放行指令, 位置>`）
-  加结算（`I.SETTLE`）：判据只写在 `I.SETTLE` 一处（`position < 水位 + 队列`，
-  或 `DONE` / `ERROR`），够号的当场放行并出表；`$I.WAIT_CHUNK` 只做
-  "登记 → 结算 → 等"，错误在末尾复查一次抛出。
-- 义务：改变可读判定的地方都必须调 `I.SETTLE()`——入队、dump 落地、
-  `$I.SET_DONE`、`I.FAIL` 共四处。漏一处即静默挂死。drain 落盘**不**
-  结算：它对 `total = 水位 + 队列` 恒定（队列 -1、水位 +1），放行不了
-  任何人；不通知门也结构性保证"介质进度不决定可读性"（此前那处是
-  O(等待者数) 的空扫，分发流越多越白扫）。
-- 作废：`I.PROGRESS` / `I.ADVANCE`；`while` 重判与"唯一发布点"的说法。
-- 终局不单列分支：放行写成单循环 `position < 水位 + 队列 || isTerminal`，
-  一处 `delete` + `resolve`。试过把终局提成前置分支（整表 `resolve` +
-  `clear()` 后返回）：逻辑等价、交错 A/B 测不出收益（四样本 3130 / 3137
-  ns/笔读），但同屏两个 `for...of` 让「放行点只有一处」不再一眼可见，故回退。
-- 登记表容器取 `Map<放行指令, 位置>`（键是 `resolve`，故 `$I.WAIT_CHUNK`
-  能就地 `set(resolve, position)`）：不是为了省那个字面量——交错 A/B 实测
-  Map 两种取位写法与 Set 版都无差异——而是让容器自己说明键值分工。
-- 空表早返回：`I.SETTLE` 首行见 `I.PENDING_RELEASES` 为空即返回——写侧
-  每块两次结算（入队、落盘）在"无人在等"时不扫表；无人在等时本就无人
-  可放行，是纯收益，且只有"读器贴着前沿"时才不触发。
-- 实测（`logs/probe-wait-cost.mjs`，1e6 次 / 1e5 笔）：命中路径过门
-  445–483ns 对"命中即返回"153–155ns（整条读路径 ~3.0µs → ~2.6µs，约
-  −15%）；promise 构造本身只占 ~20ns（地板 ~30ns 对"建 promise 再
-  await" ~58ns）。读路径本身 ~3µs/块 ≈ 22GB/s（64KB 块），远快于任何
-  现实消费者，故**不**改命中即返回：它要让判据落两处、并把 `I.ERROR`
-  检查提到命中路径，为 15% 换掉"判据只写一处"，不划算。
-- 实测（`logs/probe-gate.mjs`）：入队即放行；按号放行（号 2 要等第三块）；
-  dump 在途不放行、落地即放行；`SET_DONE` 放行"永不会有块"的等待者；
-  `FAIL` 以原因拒绝等待者与后来者。三个既有探针输出不变。
-
-### 2026-09-18 — 注册表：成员资格就是降级交接名单
-
-- 角色收敛：`ForkedReadableStreamRegistry` 不是"活体统计"，而是**降级
-  交接名单**——`$I.DEGRADE` 靠遍历它给每个拷贝换读器、播种位置。由此
-  得出唯一义务：降级那一刻还读得动的成员，一个都不能漏；出表只能由
-  fork 自己在出口（读到尾 / 被 cancel）发起。
-- 结论：**删除扫描式清理**（原 `pruneAll()`：按 `$I.CANCELLED` 重扫）。
-  它任意时刻调用都扫不到东西——`$I.CANCELLED` 只在 `cancel` 里置位，
-  紧跟着同一同步块就 `prune(this)`，判据与出表共线。
-- 为何"误清"不能忍：注册表不只是登记簿——漏掉交接的 fork 会留着
-  `BufferChunkReader`，而降级同时已把 stash `DROP`。于是它要么抛
-  `ChunkStash has been dropped`，要么在源已尽那一支静默 `done: true`
-  截断。判据不准的"多扫几遍"是往正确性上开洞，不是清理。
-- 源报错留下的尸体不构成缺口：降级触发点唯一（`toStash`，`degraded`
-  置位后至多一次），且只在消费成功的 `pull()` 里可达；源报错后消费
-  路径永久停止，故再无降级会鞭到那些尸体——只占内存。
-- 代价（记录在案）：表到 fork 的强引用，加上 fork 的 `I.DISTRIBUTOR`
-  回引，构成双向强引用——只要消费者还握着任一 fork，整条图（源读器、
-  stash 及其字节、源流）都不可回收。"最后一个 fork 被丢弃"是分发器
-  可回收的前提。
-- 顺带：fork 取注册表改经分发器的受保护符号（见上方
-  `$I.FORKED_READABLE_STREAM_REGISTRY`），并在构造器闭包里捕获；于是
-  fork 不再持有注册表字段与私有符号。内部类用父级符号的办法是**由本级
-  的 `Symbol.mjs` 转发父级表**（`export * as DISTRIBUTOR from '../Symbol.mjs'`）
-  ——避免让 `Symbol.mjs` 变成非叶子（那正是此前模块环的成因）。环检查
-  脚本（`logs/check-import-cycles.mjs`）：29 个模块，强连通分量 0。
-
-### 2026-09-18 — terminate：延迟暴露的终止信号（09-19 已取代）
-
-- 语义取自 DESIGN 示例注释，本次落地四件：幂等；终止原因落
-  `$I.TERMINATION`（`DOMException`，`name` 为 `AbortError`）；当场
-  `SOURCE_READER.cancel(原因)` 切断并释放源；按相位把"不再有数据"交给
-  落点（内存相位 stash `$I.SET_DONE`，降级相位 transferrer
-  `$I.SET_DONE`）。落点选择在 `terminate()` 里就地做（不经过消费代理）：
-  `$I.TRANSFERRER` 就是那个选择器，且它是降级唯一的写入点。
-- 命名分层（本期定）：原 `destroy()` 改名 `terminate()`——它终结的是
-  **可用性**，资源并没有被摧毁（介质还在、拷贝还在跑、源只是被放弃）。
-  `destroy` 空出来专指"强制摧毁全部资源"那一档（不延迟暴露）。
-  状态/动作/观察三者同名：`$I.TERMINATION` /
-- 释放时机取"当场"而非"表空"：源在构造时就被锁死归分发器所有，
-  terminate 就是放弃这份源，早释放让连接/FD 立刻回收。DESIGN 原文把它
-  排在末尾（"关闭文件 → 释放 source reader"），已改为当场。
-- 已建 fork 自决生命周期：读到前沿时按 `$I.TERMINATION` 分叉
-  close/error。分发器不做带外 poke，于是 fork 的 `I.CONTROLLER`
-  （"留给将来的 destroy 用"）失去唯一用户，连同 `start` 桥一起删。
-- 两处必要改动：`ensure()` 的循环与收尾都认
-  `cancelled`（否则目标永远追不上，循环对着空目标空转）；
-  `SourceReader` 收摊后 `read()` 直接答 `{done:true}`，不再落到已释放的
-  reader 上换一个 TypeError。
-- 硬档骨架（同日随后落地）：`destroy()` = `terminate()` + 对每个活体
-  `fork.$I.ABORT(终止原因)` 带外 errored + `registry.clear()` + stash
-  `$I.DROP()`。**顺序**：先 poke 活体再清表（否则名单没了）。
-  它自己不持状态——四步各自幂等，故二次 `destroy()` 天然无害。
-  被删的 `I.CONTROLLER` 与 `start` 桥随硬档回来（这次它们有真实用户）。
-- 未做：写侧介质释放（要写侧先补关闭口）、表空自动收尾（要"表空"通知
-  路径）。terminate 后 `fork()` 仍抛错——DESIGN 旧文那句"新 fork() 亦然"
-  与此冲突，已改文。
-- 实测（`logs/probe-terminate.mjs`）：terminate 幂等；源的 cancel 收到
-  同一个 `AbortError`；再 fork 抛错；两个存活拷贝都读完同一个冻结前缀
-  并以 `AbortError` 收尾；注册表随各自出表清零。降级相位见
-  `logs/probe-terminate-degraded.mjs`（冻结前缀在介质上，仍然不挂死）。
-- 拆档修订（同日）：原 terminate 里包含 `SOURCE_READER.cancel()`——取消
-  源会触发**源自己的** cancel 回调并释放锁，那是"动别人的东西"，不属于
-  "终结自己的可用性"。改为 terminate 不碰源，取消移到 destroy。
-  随之必须做的两件（不然不自洽）：① `ensure()` 的"不再拉取"判据从
-  `sourceReader.cancelled` 换成分发器的 `$I.TERMINATION`——实验
-  `logs/probe-terminate-no-cancel.mjs` 量到：不换判据、只不取消，终止后
-  还会再拉一笔（前沿根本没冻结）；② `pull()` 读到数据后复查终止状态、
-  作废在途那一笔，否则前沿被它推迟一格。
-- 拆档的代价（级联下最明显）：软档不再放弃源，所以**上级的 fork 不会
-  因下级 terminate 而退出**，锁定着上级的源直到下级 destroy。
-  `probe-cascade.mjs` 已按此更新：`内层 terminate 后 外层表` 保持 1。
-- 实测（`logs/probe-destroy.mjs`）：destroy 幂等；注册表 2 → 0；stash
-  当场释放；再 `fork()` 抛错；**从未开读过一笔的拷贝也立刻收到
-  `AbortError`**（不补缓冲）——这就是“差在何时，不在何物”。两档对照：
-  同一个场景用 `terminate()` 时，那个拷贝会先拿到缓冲里的块再收错。
-
-### 2026-09-19 — 闸门与封条：谁关闸门、谁封口
-
-- 模型重定（用户口径）：`$I.TERMINATION` 只是**看大门的标记**——只拒
-  新建 fork；已建 fork 照旧运行，**需要数据就继续向源拉取**。
-  `terminate()` 只置标记 + 派事件，不封口、不取消源、不碰拷贝。
-  **封口（前沿定长）与切断源归 `destroy()`**，已建拷贝各自读到前沿
-  自然收尾（`close()`）。
-- 由此删掉消费代理里两处 `$I.TERMINATION` 判据，换成各自的真实判据：
-  `ensure()` 的循环认“源还能不能拉”（`!sourceReader.finished`）；
-  `pull()` 回到加判据之前的样子——不再看任何封口/终止状态。
-  两条教训留档：循环不许在没有封口的情况下提前停（终止后不拉取、而
-  `stash.done` 只由自然到头或 `destroy` 置 ⇒ 读侧拿
-  `{done:false, value:undefined}` 无限空转）；反过来，在 `pull()` 里
-  “作废已拉回的一笔”会让 `pulledChunkCount` 不前进、循环条件永远成立
-  ⇒ 把源一路抽干、每笔都丢掉、读侧永不返回。
-- `ensure()` 的循环还带出一个真坑：`SourceReader.READ` 在 `CANCELLED`
-  之后**不再写 `DONE`**（`if (!this[I.CANCELLED]) this[I.DONE] = ...`），
-  而 `read()` 一进门就短路答 `{done:true}`。所以 `destroy()` 取消源之后，
-  只看 `done` 的循环会“每圈 `SET_DONE` 一次”地转下去——判据必须把
-  `cancelled` 算进去（因此有了 `SourceReader.finished`）。
-- **在途那一笔不再丢**：`pull()` 曾经有一条“落点已封口就别写”的判据
-  （旧模型遗留）。实测（`logs/probe-straggler.mjs`）：留着它，封口瞬间
-  已在路上的那一笔被丢掉（拷贝拿到空前缀）；删掉则两拷贝一致地拿到它。
-  分叉由 `ensure()` 收尾那句“源已终而仍有在途 pull 就等它”拦住：任何
-  拷贝读之前都排在同一个在途 pull 后面，于是封口之后落地的那一笔对谁
-  都可见、顺序也一致。降级相位同样实测
-  （`logs/probe-degraded-straggler.mjs`，封口落在一次介质写途中）：两个
-  拷贝拿到同一笔（`s3`）与同一段尾巴（`s4`），不分叉。
-- 截断对读侧不可见（本期取此）：拷贝一律 `close()`，下游分不清“传输
-  完整”与“被宿主切断”；要分辨只能靠宿主侧的 `terminate` 事件。旧文
-  “下游可据此区分意外终止与策略截断”因此作废；源**报错**那条路不变
-  （read 拒绝，流自然 error）。
-- 连带给删：`ForkedReadableStream.$I.ABORT`、`I.CONTROLLER` 与 `start`
-  桥（唯一用户是 abort）、注册表 `clear()`（唯一用户是 destroy）——都
-  不再有调用者。
-- 实测：`logs/probe-terminate.mjs`（terminate 后已建拷贝仍在消费源：
-  `A 放行(1)` / `B 放行(0)`；再 fork 抛错；`destroy()` 后两拷贝
-  `[0,1]`、双双 `close`、同一前缀、表自清）、`logs/probe-destroy.mjs`
-  （两拷贝同一前缀 `close`；`stash已释放: false` 是已知缺口）、
-  `logs/probe-terminate-degraded.mjs`（降级相位不挂死，双双 `done`）、
-  `logs/probe-terminate-degraded-race.mjs`（排水途中 `destroy()`，两拷贝
-  同一前缀 `[s0,s1,s2]`）、`logs/probe-cascade.mjs`（内层 `destroy()` 的
-  取消向上传：`外层表 0`；外层 `destroy()` 向下传播：无 abort，各拷贝
-  自己走到前沿）。
-- 已知缺口：`destroy()` 之后 stash 与介质活到 GC（引用计数未实现），
-  被遗弃的拷贝会把前缀吊住；更强的强制档留给后续。
+现结论见上方：「读路径」/「SourceConsumptionAgent（消费代理）」。

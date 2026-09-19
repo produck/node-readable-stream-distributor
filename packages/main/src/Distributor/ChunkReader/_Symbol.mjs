@@ -23,3 +23,13 @@ const _I_READ = Symbol('._read()');
 export const _I = deepFreeze({
   READ: _I_READ,
 });
+
+export const A = deepFreeze({
+  I: {
+    AGENT: I_SOURCE_CONSUMPTION_AGENT,
+  },
+  $I: {
+    CONSUMED_COUNT: $I_CONSUMED_CHUNK_COUNT,
+    STASH: $I_CHUNK_STASH,
+  },
+});

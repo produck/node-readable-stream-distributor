@@ -1,6 +1,6 @@
 import * as Ow from '@produck/ow';
 
-import { I, $I } from './Symbol.mjs';
+import { I, $I } from './_Symbol.mjs';
 
 export default class ChunkStash {
   [I.CHUNKS] = [];

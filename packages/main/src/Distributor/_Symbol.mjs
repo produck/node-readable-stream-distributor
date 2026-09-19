@@ -21,13 +21,13 @@ export const I = deepFreeze({
 });
 
 const $I_STASH_BYTE_LIMIT = Symbol('.$stashByteLimit');
-const $I_FORKED_READABLE_STREAM_REGISTRY = Symbol(
-  '.$forkedReadableStreamRegistry',
-);
 const $I_TERMINATION = Symbol('.$termination');
 const $I_TRANSFERRER = Symbol('.$transferrer');
 const $I_SET_TRANSFERRER_ARGS = Symbol('.$setTransferrerArgs()');
 const $I_DEGRADE = Symbol('.$degrade()');
+const $I_FORKED_READABLE_STREAM_REGISTRY = Symbol(
+  '.$forkedReadableStreamRegistry',
+);
 
 export const $I = deepFreeze({
   STASH_BYTE_LIMIT: $I_STASH_BYTE_LIMIT,
@@ -42,4 +42,23 @@ const S_DEGRADED_CHUNK_READER_CTOR = Symbol('._degradedChunkReaderCtor');
 
 export const _S = deepFreeze({
   DEGRADED_CHUNK_READER_CTOR: S_DEGRADED_CHUNK_READER_CTOR,
+});
+
+export const A = deepFreeze({
+  I: {
+    STASH: I_CHUNK_STASH,
+    AGENT: I_SOURCE_CONSUMPTION_AGENT,
+    SOURCE: I_SOURCE_READER,
+    CTOR: {
+      TRANSFERRER: I_TRANSFERRER_CTOR,
+      READER: {
+        DEGRADED: I_DEGRADED_CHUNK_READER_CTOR,
+        CURRENT: I_CURRENT_CHUNK_READER_CTOR,
+      },
+    },
+  },
+  $I: {
+    LIMIT: $I_STASH_BYTE_LIMIT,
+    REGISTRY: $I_FORKED_READABLE_STREAM_REGISTRY,
+  },
 });

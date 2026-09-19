@@ -1,6 +1,6 @@
 import * as Ow from '@produck/ow';
 
-import { I } from './Symbol.mjs';
+import { I } from './_Symbol.mjs';
 
 export default class SourceReader {
   [I.DONE] = false;

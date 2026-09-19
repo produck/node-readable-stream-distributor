@@ -45,3 +45,9 @@ const _S_TRANSFERRER_CTOR = Symbol('._transferrerCtor');
 export const _S = deepFreeze({
   TRANSFERRER_CTOR: _S_TRANSFERRER_CTOR,
 });
+
+export const A = deepFreeze({
+  I: {
+    SEEKED_COUNT: I_SEEKED_CHUNK_COUNT,
+  },
+});

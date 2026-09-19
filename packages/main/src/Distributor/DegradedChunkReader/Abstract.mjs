@@ -1,21 +1,21 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as ChunkReader from '../ChunkReader/index.mjs';
-import * as Transferrer from './Transferrer/index.mjs';
-import { I, $I, _I, _S } from './Symbol.mjs';
+import { I, $I, _I, _S, A } from './_Symbol.mjs';
+import { TRANSFERRER, _A } from './_External.mjs';
 
 class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   [I.CLOSED] = false;
   [I.INITIALIZED];
-  [I.SEEKED_CHUNK_COUNT] = 0;
+  [A.I.SEEKED_COUNT] = 0;
   [I.ERROR] = null;
 
   get chunkStash() {
-    return this[ChunkReader.$I.CHUNK_STASH];
+    return this[_A.READER.A.$I.STASH];
   }
 
-  constructor(sourceConsumptionAgent, chunkStash, transferrer) {
-    super(sourceConsumptionAgent, chunkStash);
+  constructor(agent, stash, transferrer) {
+    super(agent, stash);
     this[$I.TRANSFERRER] = transferrer;
   }
 
@@ -24,15 +24,13 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   [$I.REQUEST_INITIALIZE](progress) {
-    this[ChunkReader.$I.CONSUMED_CHUNK_COUNT] = progress;
+    this[_A.READER.A.$I.CONSUMED_COUNT] = progress;
     this[I.INITIALIZED] = this[I.INITIALIZE]();
   }
 
   async [I.INITIALIZE]() {
-    const transferrer = this[$I.TRANSFERRER];
-
     try {
-      await transferrer.dumping;
+      await this[$I.TRANSFERRER].dumping;
       await this[_I.INITIALIZE]();
       await this[I.SYNC]();
     } catch (cause) {
@@ -41,8 +39,8 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   async [I.SYNC]() {
-    const target = this[ChunkReader.$I.CONSUMED_CHUNK_COUNT];
-    let count = this[I.SEEKED_CHUNK_COUNT];
+    const target = this[_A.READER.A.$I.CONSUMED_COUNT];
+    let count = this[A.I.SEEKED_COUNT];
 
     while (count < target) {
       if (!(await this[_I.SEEK]())) {
@@ -52,7 +50,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
       count++;
     }
 
-    this[I.SEEKED_CHUNK_COUNT] = count;
+    this[A.I.SEEKED_COUNT] = count;
   }
 
   async [$I.CLOSE]() {
@@ -65,13 +63,13 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     await this[_I.CLOSE]();
   }
 
-  async [ChunkReader._I.READ]() {
+  async [_A.READER._I.READ]() {
     const transferrer = this[$I.TRANSFERRER];
-    const position = this[ChunkReader.$I.CONSUMED_CHUNK_COUNT];
+    const position = this[_A.READER.A.$I.CONSUMED_COUNT];
 
-    await transferrer[Transferrer.$I.WAIT_CHUNK](position);
+    await transferrer[TRANSFERRER.$I.WAIT_CHUNK](position);
 
-    const chunk = transferrer[Transferrer.$I.PEEK](position);
+    const chunk = transferrer[TRANSFERRER.$I.PEEK](position);
 
     if (chunk !== undefined) {
       return { done: false, value: chunk };
@@ -92,7 +90,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     const result = await this[_I.READ]();
 
     if (!result.done) {
-      this[I.SEEKED_CHUNK_COUNT]++;
+      this[A.I.SEEKED_COUNT]++;
     }
 
     return result;

@@ -3,44 +3,42 @@ import { ThrowTypeError } from '@produck/type-error';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as BufferChunkReader from './BufferChunkReader/index.mjs';
-import * as DegradedChunkReader from './DegradedChunkReader/index.mjs';
-import * as Event from './Event.mjs';
 import * as ForkedReadableStream from './ForkedReadableStream/index.mjs';
-import * as ChunkReader from './ChunkReader/index.mjs';
 import * as ChunkStash from './ChunkStash/index.mjs';
 import * as SourceReader from './SourceReader/index.mjs';
+
 import SourceConsumptionAgent from './SourceConsumptionAgent.mjs';
 import ForkedReadableStreamRegistry from './ForkedReadableStreamRegistry.mjs';
-import { isReadableStreamLike } from './Checker.mjs';
-import { I, $I, _S } from './Symbol.mjs';
+import * as Checker from './Checker.mjs';
+import * as Event from './Event.mjs';
 import * as Parser from './Parser.mjs';
-
-const { Transferrer } = DegradedChunkReader;
+import { I, $I, _S, A } from './_Symbol.mjs';
+import { _A, TRANSFERRER } from './_External.mjs';
 
 class ReadableStreamDistributor extends EventTarget {
-  [I.CHUNK_STASH] = new ChunkStash.Concrete();
-  [I.CURRENT_CHUNK_READER_CTOR] = BufferChunkReader.Concrete;
+  [A.I.STASH] = new ChunkStash.Concrete();
+  [A.$I.REGISTRY] = new ForkedReadableStreamRegistry();
   [$I.TERMINATION] = null;
-  [$I.STASH_BYTE_LIMIT];
+  [A.$I.LIMIT] = 0;
   [I.TRANSFERRER_ARGS] = [];
   [$I.TRANSFERRER] = null;
-  [$I.FORKED_READABLE_STREAM_REGISTRY] = new ForkedReadableStreamRegistry();
+  [A.I.CTOR.READER.CURRENT] = BufferChunkReader.Concrete;
 
   constructor(source, stashByteLimit = 1024 ** 3) {
     super();
 
-    if (!isReadableStreamLike(source)) {
+    if (!Checker.isReadableStreamLike(source)) {
       ThrowTypeError('source', 'a WHATWG ReadableStream');
     }
 
-    this[$I.STASH_BYTE_LIMIT] = Parser.NonNegativeInteger(stashByteLimit);
     this[I.CTOR] = new.target;
-    this[I.SOURCE_READER] = new SourceReader.Concrete(source);
-    this[I.SOURCE_CONSUMPTION_AGENT] = new SourceConsumptionAgent(this);
+    this[A.$I.LIMIT] = Parser.NonNegativeInteger(stashByteLimit);
+    this[A.I.SOURCE] = new SourceReader.Concrete(source);
+    this[A.I.AGENT] = new SourceConsumptionAgent(this);
   }
 
   get degraded() {
-    return this[I.SOURCE_CONSUMPTION_AGENT].degraded;
+    return this[A.I.AGENT].degraded;
   }
 
   get terminated() {
@@ -56,20 +54,18 @@ class ReadableStreamDistributor extends EventTarget {
       Ow.Error.Common('Distributor has been terminated');
     }
 
-    const agent = this[I.SOURCE_CONSUMPTION_AGENT];
-    const stash = this[I.CHUNK_STASH];
+    const agent = this[A.I.AGENT];
+    const stash = this[A.I.STASH];
     const transferrer = this[$I.TRANSFERRER];
-    const registry = this[$I.FORKED_READABLE_STREAM_REGISTRY];
-    const ChunkReaderImpl = this[I.CURRENT_CHUNK_READER_CTOR];
-    const chunkReader = new ChunkReaderImpl(agent, stash, transferrer);
+    const ChunkReaderImpl = this[A.I.CTOR.READER.CURRENT];
+    const reader = new ChunkReaderImpl(agent, stash, transferrer);
 
-    if (ChunkReaderImpl === this[I.DEGRADED_CHUNK_READER_CTOR]) {
-      chunkReader[DegradedChunkReader.$I.REQUEST_INITIALIZE](0);
+    if (ChunkReaderImpl === this[A.I.CTOR.READER.DEGRADED]) {
+      reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](0);
     }
 
-    const forked = new ForkedReadableStream.Concrete(this, chunkReader, label);
+    const forked = new ForkedReadableStream.Concrete(this, reader, label);
 
-    registry.add(forked);
     this.dispatchEvent(new Event.Fork(forked));
 
     return forked;
@@ -84,41 +80,39 @@ class ReadableStreamDistributor extends EventTarget {
     this[I.TRANSFERRER_ARGS] = args;
   }
 
-  get [I.DEGRADED_CHUNK_READER_CTOR]() {
+  get [A.I.CTOR.READER.DEGRADED]() {
     return this[I.CTOR][_S.DEGRADED_CHUNK_READER_CTOR];
   }
 
-  get [I.TRANSFERRER_CTOR]() {
-    const DegradedChunkReaderImpl = this[I.DEGRADED_CHUNK_READER_CTOR];
-
-    return DegradedChunkReaderImpl[DegradedChunkReader._S.TRANSFERRER_CTOR];
+  get [A.I.CTOR.TRANSFERRER]() {
+    return this[A.I.CTOR.READER.DEGRADED][_A.DEGRADED._S.TRANSFERRER_CTOR];
   }
 
   [$I.DEGRADE]() {
     const {
-      [I.DEGRADED_CHUNK_READER_CTOR]: DegradedChunkReaderImpl,
-      [I.TRANSFERRER_CTOR]: TransferrerImpl,
+      [A.I.CTOR.READER.DEGRADED]: DegradedChunkReaderImpl,
+      [A.I.CTOR.TRANSFERRER]: TransferrerImpl,
     } = this;
 
-    const agent = this[I.SOURCE_CONSUMPTION_AGENT];
-    const stash = this[I.CHUNK_STASH];
+    const agent = this[A.I.AGENT];
+    const stash = this[A.I.STASH];
     const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
 
-    transferrer[Transferrer.$I.DUMP](stash).catch((cause) => {
+    transferrer[TRANSFERRER.$I.DUMP](stash).catch((cause) => {
       this.dispatchEvent(new Event.Warn('dump-failed', cause));
     });
 
     this[$I.TRANSFERRER] = transferrer;
-    this[I.CURRENT_CHUNK_READER_CTOR] = DegradedChunkReaderImpl;
+    this[A.I.CTOR.READER.CURRENT] = DegradedChunkReaderImpl;
 
-    for (const forked of this[$I.FORKED_READABLE_STREAM_REGISTRY]) {
+    for (const [forked] of this[A.$I.REGISTRY]) {
       const reader = new DegradedChunkReaderImpl(agent, stash, transferrer);
-      const bufferChunkReader = forked[ForkedReadableStream.$I.CHUNK_READER];
-      const progress = bufferChunkReader[ChunkReader.$I.CONSUMED_CHUNK_COUNT];
+      const bufferChunkReader = forked[_A.FORKED.A.$I.READER];
+      const progress = bufferChunkReader[_A.READER.A.$I.CONSUMED_COUNT];
 
-      reader[DegradedChunkReader.$I.REQUEST_INITIALIZE](progress);
-      bufferChunkReader[BufferChunkReader.$I.HANDOVER](reader);
-      forked[ForkedReadableStream.$I.SET_DEGRADED_CHUNK_READER](reader);
+      reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](progress);
+      bufferChunkReader[_A.BUFFER.$I.HANDOVER](reader);
+      forked[_A.FORKED.$I.SET_DEGRADED_CHUNK_READER](reader);
     }
   }
 
@@ -138,19 +132,28 @@ class ReadableStreamDistributor extends EventTarget {
     this.terminate();
 
     const transferrer = this[$I.TRANSFERRER];
+    const registry = this[A.$I.REGISTRY];
 
     if (transferrer === null) {
-      this[I.CHUNK_STASH][ChunkStash.$I.SET_DONE]();
+      this[A.I.STASH][_A.STASH.$I.SET_DONE]();
     } else {
-      transferrer[Transferrer.$I.SET_DONE]();
+      transferrer[TRANSFERRER.$I.SET_DONE]();
     }
 
-    this[I.SOURCE_READER].cancel(this[$I.TERMINATION]).catch((cause) => {
+    const termination = this[$I.TERMINATION];
+
+    for (const [forked, controller] of registry) {
+      controller.error(termination);
+      registry.prune(forked);
+    }
+
+    this[A.I.SOURCE].cancel(termination).catch((cause) => {
       this.dispatchEvent(new Event.Warn('source-cancel-failed', cause));
     });
 
-    // TODO: release the stash and the medium once the last copy has ended
-    //   (reference counting); the write side has no close/release member yet.
+    // TODO: release the read side and the medium once every copy is ended —
+    //   the read device has no uniform close verb yet, and the write side has
+    //   no release member.
   }
 }
 

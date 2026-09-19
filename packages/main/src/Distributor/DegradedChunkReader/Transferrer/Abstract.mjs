@@ -1,13 +1,13 @@
 import * as Ow from '@produck/ow';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
-import * as ChunkStash from '../../ChunkStash/index.mjs';
-import { I, $I, _I } from './Symbol.mjs';
+import { I, $I, _I, A } from './_Symbol.mjs';
+import { _A } from './_External.mjs';
 
 const noop = () => {};
 
 class AbstractTransferrer {
-  [I.WRITTEN_CHUNK_COUNT] = 0;
+  [A.I.WRITTEN_COUNT] = 0;
   [I.PENDING_CHUNKS] = [];
   [I.PENDING_RELEASES] = new Map();
   [I.DRAINING] = null;
@@ -22,7 +22,7 @@ class AbstractTransferrer {
       return;
     }
 
-    const total = this[I.WRITTEN_CHUNK_COUNT] + this[I.PENDING_CHUNKS].length;
+    const total = this[A.I.WRITTEN_COUNT] + this[I.PENDING_CHUNKS].length;
     const isTerminal = this[I.DONE] || this[I.ERROR] !== null;
 
     for (const [release, position] of pendingReleases) {
@@ -57,7 +57,7 @@ class AbstractTransferrer {
       }
 
       this[I.PENDING_CHUNKS].shift();
-      this[I.WRITTEN_CHUNK_COUNT] += 1;
+      this[A.I.WRITTEN_COUNT] += 1;
     }
 
     this[I.DRAINING] = null;
@@ -70,9 +70,9 @@ class AbstractTransferrer {
 
     try {
       await this[_I.DUMP](chunkStash);
-      chunkStash[ChunkStash.$I.DROP]();
+      chunkStash[_A.STASH.$I.DROP]();
       this[I.PENDING_CHUNKS].splice(0, length);
-      this[I.WRITTEN_CHUNK_COUNT] = length;
+      this[A.I.WRITTEN_COUNT] = length;
       this[I.SETTLE]();
     } catch (cause) {
       this[I.FAIL](cause);
@@ -113,7 +113,7 @@ class AbstractTransferrer {
   }
 
   [$I.PEEK](position) {
-    return this[I.PENDING_CHUNKS][position - this[I.WRITTEN_CHUNK_COUNT]];
+    return this[I.PENDING_CHUNKS][position - this[A.I.WRITTEN_COUNT]];
   }
 
   [$I.SET_DONE]() {

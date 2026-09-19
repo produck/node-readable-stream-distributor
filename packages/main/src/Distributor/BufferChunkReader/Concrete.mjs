@@ -1,5 +1,7 @@
 import * as ChunkReader from '../ChunkReader/index.mjs';
-import { I, $I } from './Symbol.mjs';
+
+import { I, $I } from './_Symbol.mjs';
+import { _A } from './_External.mjs';
 
 export default class BufferChunkReader extends ChunkReader.Abstract {
   [I.SUCCESSOR] = null;
@@ -8,20 +10,20 @@ export default class BufferChunkReader extends ChunkReader.Abstract {
     this[I.SUCCESSOR] = successor;
   }
 
-  async [ChunkReader._I.READ]() {
+  async [_A.READER._I.READ]() {
     const successor = this[I.SUCCESSOR];
 
     if (successor !== null) {
-      return successor[ChunkReader.$I.READ]();
+      return successor[_A.READER.$I.READ]();
     }
 
-    const index = this[ChunkReader.$I.CONSUMED_CHUNK_COUNT];
-    const chunkStash = this[ChunkReader.$I.CHUNK_STASH];
-    const done = chunkStash.done && index >= chunkStash.length;
+    const index = this[_A.READER.A.$I.CONSUMED_COUNT];
+    const stash = this[_A.READER.A.$I.STASH];
+    const done = stash.done && index >= stash.length;
     const result = { done, value: undefined };
 
     if (!done) {
-      result.value = chunkStash.get(index);
+      result.value = stash.get(index);
     }
 
     return result;

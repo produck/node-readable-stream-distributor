@@ -1,6 +1,5 @@
-import * as ChunkStash from './ChunkStash/index.mjs';
-import { Transferrer } from './DegradedChunkReader/index.mjs';
-import { I, $I } from './Symbol.mjs';
+import { $I, A } from './_Symbol.mjs';
+import { _A, TRANSFERRER } from './_External.mjs';
 
 export default class SourceConsumptionAgent {
   degraded = false;
@@ -21,7 +20,7 @@ export default class SourceConsumptionAgent {
   // a switch started inside has settled.
   async ensure(target) {
     const { distributor } = this;
-    const sourceReader = distributor[I.SOURCE_READER];
+    const sourceReader = distributor[A.I.SOURCE];
 
     // TODO: observation — the backlog is never capped by design (a hung
     //   medium is weathered while memory allows), so the host needs a way to
@@ -40,7 +39,7 @@ export default class SourceConsumptionAgent {
   }
 
   async pull() {
-    const { value, done } = await this.distributor[I.SOURCE_READER].read();
+    const { value, done } = await this.distributor[A.I.SOURCE].read();
 
     if (this.degraded) {
       await this.toTransferrer(value, done);
@@ -57,19 +56,19 @@ export default class SourceConsumptionAgent {
 
   toStash(chunk, done) {
     const { distributor } = this;
-    const chunkStash = distributor[I.CHUNK_STASH];
+    const chunkStash = distributor[A.I.STASH];
 
     if (done) {
-      chunkStash[ChunkStash.$I.SET_DONE]();
+      chunkStash[_A.STASH.$I.SET_DONE]();
 
       return;
     }
 
-    chunkStash[ChunkStash.$I.PUSH](chunk);
+    chunkStash[_A.STASH.$I.PUSH](chunk);
 
     // NEED DEGRADING???
-    if (chunkStash.byteLength > distributor[$I.STASH_BYTE_LIMIT]) {
-      chunkStash[ChunkStash.$I.SEAL]();
+    if (chunkStash.byteLength > distributor[A.$I.LIMIT]) {
+      chunkStash[_A.STASH.$I.SEAL]();
       this.degraded = true;
       distributor[$I.DEGRADE]();
     }
@@ -83,11 +82,11 @@ export default class SourceConsumptionAgent {
     //   recorded in its own medium would have to extend the transferrer
     //   contract.
     if (done) {
-      transferrer[Transferrer.$I.SET_DONE]();
+      transferrer[TRANSFERRER.$I.SET_DONE]();
 
       return;
     }
 
-    await transferrer[Transferrer.$I.WRITE](chunk);
+    await transferrer[TRANSFERRER.$I.WRITE](chunk);
   }
 }
