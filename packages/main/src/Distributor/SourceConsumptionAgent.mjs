@@ -26,7 +26,7 @@ export default class SourceConsumptionAgent {
     // TODO: observation — the backlog is never capped by design (a hung
     //   medium is weathered while memory allows), so the host needs a way to
     //   watch its size instead of the source being throttled on it.
-    while (target >= this.pulledChunkCount && !sourceReader.done) {
+    while (target >= this.pulledChunkCount && !sourceReader.finished) {
       if (this.pulling === null) {
         this.pulling = this.pull().finally(() => (this.pulling = null));
       }
@@ -34,7 +34,7 @@ export default class SourceConsumptionAgent {
       await this.pulling;
     }
 
-    if (sourceReader.done && this.pulling !== null) {
+    if (sourceReader.finished && this.pulling !== null) {
       await this.pulling;
     }
   }

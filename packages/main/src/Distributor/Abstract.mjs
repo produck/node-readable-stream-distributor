@@ -20,7 +20,7 @@ const { Transferrer } = DegradedChunkReader;
 class ReadableStreamDistributor extends EventTarget {
   [I.CHUNK_STASH] = new ChunkStash.Concrete();
   [I.CURRENT_CHUNK_READER_CTOR] = BufferChunkReader.Concrete;
-  [I.DESTROYED] = false;
+  [$I.TERMINATION] = null;
   [$I.STASH_BYTE_LIMIT];
   [I.TRANSFERRER_ARGS] = [];
   [$I.TRANSFERRER] = null;
@@ -43,13 +43,17 @@ class ReadableStreamDistributor extends EventTarget {
     return this[I.SOURCE_CONSUMPTION_AGENT].degraded;
   }
 
+  get terminated() {
+    return this[$I.TERMINATION] !== null;
+  }
+
   fork(label = '<UNDEFINED>') {
     if (typeof label !== 'string') {
       ThrowTypeError('label', 'a string');
     }
 
-    if (this[I.DESTROYED]) {
-      Ow.Error.Common('Distributor has been destroyed');
+    if (this.terminated) {
+      Ow.Error.Common('Distributor has been terminated');
     }
 
     const agent = this[I.SOURCE_CONSUMPTION_AGENT];
@@ -118,13 +122,35 @@ class ReadableStreamDistributor extends EventTarget {
     }
   }
 
-  destroy() {
-    this[I.DESTROYED] = true;
-    this.dispatchEvent(new Event.Destroy());
+  terminate() {
+    if (this.terminated) {
+      return;
+    }
 
-    // TODO: stop pulling, error live forks after drain (via their controllers)
-    //   and prune the registry, release the source reader
-    Ow.Error.Common('Not implemented');
+    const message = 'The distributor has been terminated';
+    const termination = new DOMException(message, 'AbortError');
+
+    this[$I.TERMINATION] = termination;
+    this.dispatchEvent(new Event.Terminate());
+  }
+
+  destroy() {
+    this.terminate();
+
+    const transferrer = this[$I.TRANSFERRER];
+
+    if (transferrer === null) {
+      this[I.CHUNK_STASH][ChunkStash.$I.SET_DONE]();
+    } else {
+      transferrer[Transferrer.$I.SET_DONE]();
+    }
+
+    this[I.SOURCE_READER].cancel(this[$I.TERMINATION]).catch((cause) => {
+      this.dispatchEvent(new Event.Warn('source-cancel-failed', cause));
+    });
+
+    // TODO: release the stash and the medium once the last copy has ended
+    //   (reference counting); the write side has no close/release member yet.
   }
 }
 

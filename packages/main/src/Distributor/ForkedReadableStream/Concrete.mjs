@@ -4,22 +4,15 @@ import { I, $I, DISTRIBUTOR } from './Symbol.mjs';
 export default class ForkedReadableStream extends ReadableStream {
   [I.LABEL];
   [I.DISTRIBUTOR];
-  // TODO: written in the constructor but never read yet — reserved for
-  //   out-of-band control (e.g. a distributor destroy erroring live forks).
-  [I.CONTROLLER];
   [I.CHUNK_READER];
   [$I.CANCELLED] = false;
   [I.DONE] = false;
 
   constructor(distributor, bufferChunkReader, label) {
-    let _controller;
     const registry =
       distributor[DISTRIBUTOR.$I.FORKED_READABLE_STREAM_REGISTRY];
 
     super({
-      start: (controller) => {
-        _controller = controller;
-      },
       pull: async (controller) => {
         if (this[$I.CANCELLED] || this[I.DONE]) {
           return;
@@ -55,7 +48,6 @@ export default class ForkedReadableStream extends ReadableStream {
     this[I.LABEL] = label;
     this[I.DISTRIBUTOR] = distributor;
     this[I.CHUNK_READER] = bufferChunkReader;
-    this[I.CONTROLLER] = _controller;
   }
 
   get distributor() {

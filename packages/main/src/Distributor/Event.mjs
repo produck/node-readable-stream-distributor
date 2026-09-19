@@ -10,9 +10,9 @@ export class ForkEvent extends DistributorEvent {
   }
 }
 
-export class DestroyEvent extends DistributorEvent {
+export class TerminateEvent extends DistributorEvent {
   constructor() {
-    super('destroy');
+    super('terminate');
   }
 }
 
@@ -22,4 +22,4 @@ export class WarnEvent extends DistributorEvent {
   }
 }
 
-export { ForkEvent as Fork, DestroyEvent as Destroy, WarnEvent as Warn };
+export { ForkEvent as Fork, TerminateEvent as Terminate, WarnEvent as Warn };

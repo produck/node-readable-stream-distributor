@@ -34,7 +34,15 @@ export default class SourceReader {
     return this[I.READING];
   }
 
+  get finished() {
+    return this.done || this.cancelled;
+  }
+
   async [I.READ]() {
+    if (this[I.CANCELLED]) {
+      return { done: true, value: undefined };
+    }
+
     const result = await this[I.READER].read().catch((cause) => {
       if (!this[I.CANCELLED]) {
         this[I.ERROR] = cause;

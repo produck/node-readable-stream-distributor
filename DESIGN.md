@@ -68,13 +68,15 @@ while (true) {
 // （正常消费完毕会自动清理，无需手动调用）
 reader.cancel();
 
-// 强制销毁（框架层策略执行：body 超限、请求超时、客户端断开等）
-// 与错误传播同模式——延迟暴露，不对拷贝搞突袭：
-// 分发器标记为已销毁 → 不再从 source 拉取新 chunk
-// → 各拷贝照常消费已缓冲数据 → 耗尽后 stream error
-// → error 为可辨识类型（如 AbortError），下游可据此区分
-//    意外终止（source error）与策略截断（destroy）
-// → 关闭文件 → 释放 source reader → 分发器不可再用
+// 关闸门（框架层策略执行：body 超限、请求超时、客户端断开等）
+// → 不再接受新 fork（再 fork() 抛错）；已建拷贝照旧运行
+// → 需要数据就继续向源拉取，直到源自己到头（read() 收 {done: true}）
+// 切断源 + 封口（前沿定长），让已建拷贝各自读到前沿自然收尾：
+//    无带外 poke、无 abort——拷贝拿到的是自己的缓冲区 + 一次 close()
+// → 截断对读侧不可见（下游分不清“传输完整”与“被宿主切断”）；
+//    宿主侧可监听 terminate 事件自行告知下游
+// → stash 与介质的释放：见「引用计数生命周期」（未实现）
+distributor.terminate();
 distributor.destroy();
 ```
 
@@ -137,7 +139,9 @@ classDiagram
     class ReadableStreamDistributor {
         <<abstract>>
         +degraded
+        +terminated
         +fork(label)
+        +terminate()
         +destroy()
     }
 
@@ -155,6 +159,7 @@ classDiagram
         +done
         +error
         +cancelled
+        +finished
         +read()
         +cancel(reason)
     }
@@ -347,7 +352,7 @@ interface ChunkReader {
 
 - 内存路径：`stash.done && index >= stash.length`——`stash.done` 是内容
   终结，`index >= length` 是这一拷贝自己的 backlog 闸，两者合起来才是
-  它的结束（这就是延迟暴露）。
+  它的结束。
 - 文件路径：介质里的末尾标志 + 各自读到的位置，同理。
 - 源已尽只在 `SourceReader` 判定一次，经**落点**交接进存储层（内存相位
   `$I.SET_DONE()`，降级相位由 transferrer 的 `setDone()`）；此后分发流只问
@@ -522,6 +527,12 @@ sequenceDiagram
 任一拷贝 cancel 不影响其他。最后一个拷贝离开时源头
 才被释放。这就是"全停则全停"。
 
+**未实现**：表空时的自动收尾还没有触发路径——fork 只在出口把
+自己摘出注册表，没人监听"表空了"。现在的两个显式动作都不释放资源：
+`terminate()` 只关闸门；`destroy()` 封口 + 切断源，但**不**释放 stash
+与介质——未读的拷贝还要读完那段缓冲，释放得等最后一个拷贝结束（即
+上面这条引用计数路径）。在被遗弃的拷贝上，这意味着前缀活到 GC。
+
 ## 背压
 
 分发器不主动拉取 source。source 的推进由拷贝的消费驱动——
@@ -566,31 +577,37 @@ sequenceDiagram
 零外部依赖，且当前源码**零 `node:` 导入**——只用平台全局：
 
 - `EventTarget` / `ReadableStream`（WHATWG，Node 与浏览器都有）
+- `DOMException`（`destroy()` 取消源时的原因，`name` 可辨识）
 - `Set` / `Map` / `Promise.withResolvers`（语言内建）
 
 将来实现真正的文件降级时才会用到 `node:fs`（打开/读写）与 `node:crypto`
 （临时文件名的随机段），且都应落在 Node 专属模块里，不进平台中立的基类。
 
-## 待定
+## 终止信号
 
-### 流终止信号
-
-source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露**——
-各拷贝先正常消费自己进度之后的已缓冲 chunk，耗尽后才收到对应信号。
+四种收场对每个拷贝的观感：
 
 - **source done**：`controller.close()`，消费者的 `read()` 返回
   `{ done: true }`——正常结束
 - **source error**：`controller.error(err)`，消费者的 `read()` reject
   ——意外终止
-- **destroy**：同 error 路径，但错误类型可辨识（如 `AbortError`），
-  下游可据此区分意外终止与策略截断
+- **`terminate()`**：拷贝**感觉不到**。它只关闸门（不再接受新 fork），
+  已建拷贝照旧运行——需要数据就继续向源拉取
+- **`destroy()`**：闸门 + 封口（前沿定长）+ 切断源。拷贝读到前沿时
+  同样是 `close()`——截断**不**对下游可见（下游分不清“传输完整”与
+  “被宿主切断”）；要分辨只能靠宿主侧监听 `terminate` 事件
 
-这保证每个拷贝拿到的始终是连续完整前缀（不会跳号、不会缺中间块），
-且"来晚了"的拷贝也能利用已缓冲数据完成部分工作。新 `fork()`
-亦然。
+不管哪种收场，每个拷贝拿到的始终是连续完整前缀（不会跳号、不会缺
+中间块），且“来晚了”的拷贝也能利用已缓冲数据完成部分工作。
 
-对拷贝流而言，三种终止都是"流结束了"——下游不关心原因时统一处理，
-需要区分时检查 `error.name`。
+**实现**：`$I.TERMINATION` 只有三个读者——`fork()` 的闸门、`destroy()`
+取消源时给出的原因、`get terminated`。封口由 `destroy()` 按相位交给
+落点（`stash.$I.SET_DONE()` / `transferrer.$I.SET_DONE()`）。
+
+对拷贝流而言，收场只有两种形态：“流正常结束”与“流报错”——下游不
+关心原因时统一处理，需要区分时检查 `error.name`。
+
+## 待定
 
 ### 临时文件清理
 
@@ -627,6 +644,9 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
 - 是否进入降级：`distributor.degraded`（代理消费代理的相位事实）。
 - 源侧终局：`SOURCE_READER`（SourceReader）的 `done` / `error` /
   `cancelled`——源到头 / 源出错 / 我们收摊，三个终局互斥穷尽。
+- 是否已终结可用性：`distributor.terminated`；终止原因看受保护的
+  `$I.TERMINATION`（未终结为 `null`，否则是那个 `AbortError`，
+  拷贝流的 `error` 就是它）。
 - 当前活跃 fork 集合：`$I.FORKED_READABLE_STREAM_REGISTRY`
   （注册表内部 `size`）。
 - 落盘 / 存储侧水位：降级 reader 与存储策略自管，分发器不感知。
@@ -635,12 +655,13 @@ source 的终止信号（done / error / destroy）对每个拷贝**延迟暴露*
 
 分发器是 `EventTarget`，当前已派发：
 
-| 事件      | 含义           |
-| --------- | -------------- |
-| `fork`    | 新 fork 上线   |
-| `destroy` | 强制销毁被调用 |
+| 事件        | 含义                   |
+| ----------- | ---------------------- |
+| `fork`      | 新 fork 上线           |
+| `terminate` | 分发器可用性终结被调用 |
 
 源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。
+`destroy()`（强档）不另派事件：它是宿主动作，调用方本来就知道。
 
 ## 非目标
 

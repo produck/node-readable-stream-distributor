@@ -91,7 +91,7 @@ Promise"这一事实：
   进度记错、后续再切换出错。分发器是唯一调用者；初始化无 once-guard
   （2026-09-09 迁往降级家族，`I.INITIALIZATION_STARTED` 已删）。
 - **文件句柄生命周期**：所有拷贝共享同一 `init`（同一 fileHandle）。
-  `close()` 归最后一个离开的拷贝（done/cancel/destroy 皆算），
+  `close()` 归最后一个离开的拷贝（done / cancel 皆算），
   归属要在协议里定清，避免提前关闭或泄漏。
 
 ### dump 与活块的落点模型（2026-09-16 改写，取代原"停靠模型"）
@@ -227,7 +227,7 @@ Promise"这一事实：
 - 切换对拷贝流透明（拷贝只感知 `read()` 的返回值）
 - 切换期间无竞态（dump 与读 buffer 互斥）
 - 快慢拷贝的 skip 位置正确
-- 切换中的新 fork / cancel / destroy 行为确定
+- 切换中的新 fork / cancel 行为确定（`terminate()` 只关闸门，与切换无涉）
 
 ## 待定问题清单
 
@@ -254,7 +254,8 @@ Promise"这一事实：
       `I.CURRENT_CHUNK_READER_CTOR`（初值内存类，降级换读器的同一同步块里
       翻成策略类），降级相位当场 `$I.REQUEST_INITIALIZE(0)` 播种，故新拷贝
       从介质第 0 位起完整读。
-- [ ] 切换途中某拷贝 `cancel` / `destroy` → 未完成的 reader 怎么办？
+- [ ] 切换途中某拷贝 `cancel` → 未完成的 reader 怎么办？
+      （`terminate()` 已不涉于此：它只关闸门、不碰拷贝，2026-09-19）
 - [x] **在途 `read` 仍绑旧读器**：`pull` 先取 `$I.CHUNK_READER` 再调
       `$I.ENSURE_THEN_READ`，其中 `ensure()` 期间会换读器——`this` 仍是
       旧的内存读器；DROP 之后它再读即抛 `ChunkStash has been dropped`。
@@ -273,8 +274,8 @@ Promise"这一事实：
       落地后由单飞 drain 按 FIFO 补齐——顺序天然正确，拉取不停顿。
 
 > 剩余未决项集中在**分发器侧调度**：切换触发与 `dump()` 调用时机、
-> 切换中 `cancel`/`destroy` 行为（`fork` 已解：按相位取读器）、在途
-> `read` 的旧读器窗口、source 暂停/恢复衔接。
+> 切换中 `cancel` 行为（`fork` 已解：按相位取读器；`terminate()` 不碰
+> 拷贝）、在途 `read` 的旧读器窗口、source 暂停/恢复衔接。
 
 ### 3. 协调原语
 
