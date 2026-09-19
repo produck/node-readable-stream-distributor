@@ -74,7 +74,8 @@ reader.cancel();
 // 切断源 + 封口（前沿定长）+ 当场结束所有拷贝：
 //    每个活体立刻 error(AbortError)，不补已缓冲的前缀
 // → terminate 对读侧不可见，destroy 当场可辨（下游看 error.name）
-// → stash 与介质的释放：见「引用计数生命周期」（机械未齐）
+// → destroy 返回收摊 Promise（幂等）：源取消 + 在途 pull 落定后
+//    释放内存相 stash；降级相由 transferrer 关介质，见「引用计数生命周期」
 distributor.terminate();
 distributor.destroy();
 ```
@@ -115,7 +116,7 @@ graph TD
 | `AbstractChunkReader`          | 拷贝侧读取抽象——受保护 `$I.CHUNK_STASH` 持共享 stash；进度与前沿驱动（`$I.ENSURE_THEN_READ` → `$I.READ` → `_I.READ`）                                  |
 | `BufferChunkReader`            | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
 | `AbstractDegradedChunkReader`  | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                     |
-| `AbstractTransferrer`          | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE`，读侧位置门与队列计数                                                    |
+| `AbstractTransferrer`          | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE` / `$I.DROP`，读侧位置门与队列计数                                        |
 | `ChunkStash`                   | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/seal/setDone/drop），读侧公开                                                              |
 | `ForkedReadableStream`         | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                 |
 | `SourceReader`                 | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态），不含调度                                                                        |
@@ -195,6 +196,7 @@ classDiagram
     class AbstractTransferrer {
         <<abstract>>
         +dumping
+        +dropped
     }
 
     class TemporaryFileChunkReader {
@@ -397,7 +399,7 @@ graph BT
 - `AbstractDegradedChunkReader` 是降级读取器家族的抽象中间层，**纯读**：
   - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`（下游子类另开
     `get chunkStash` / `get closed` 两个便利面）；读侧**不认识
-    dump**，只认**接受度** `transferrer.$I.WAIT_CHUNK(position)`：每次
+    dump**，只认**接受度** `transferrer.$I.WAIT_POSITION(position)`：每次
     `read()` 先过门，队列里还在的位由抽象层直接交付；要走介质时先惰性
     初始化——策略要 open / 定位时介质必已存在；`close()` await 它。
   - **写侧不在此类**：写侧类由家族静态 `_S.TRANSFERRER_CTOR`
@@ -425,7 +427,7 @@ graph BT
     队列并确保 drain 在途；队列无上限，积压处置归下游。
   - `$I.SET_DONE()` — 源已尽在降级相位的落点：agent 在 done 那趟拉取
     同步置位；同时结算门（"该位永不会有块"由它冻结）。
-  - 读侧原语：`$I.WAIT_CHUNK(position)`（等该位**已被接受**：在介质上
+  - 读侧原语：`$I.WAIT_POSITION(position)`（等该位**已被接受**：在介质上
     或在队列里；到头也算）与 `$I.PEEK(position)`（取队列里那一块，
     越界/已落介质则 `undefined`）。实例是纯内部对象：不开公开观察面
     （调试看符号表），家族只经 `get dumping` 与 `$I` 原语交互。
@@ -527,11 +529,19 @@ sequenceDiagram
 任一拷贝 cancel 不影响其他。最后一个拷贝离开时源头
 才被释放。这就是"全停则全停"。
 
-**未实现**：`destroy()` 已经把每个拷贝当场结束并让它出表，所以释
-放不再需要引用计数——差的是两件机械：读侧没有统一的 close 动词
-（降级族有 `$I.CLOSE`，今天无调用者；内存族无资源、应有空实现），
-写侧没有释放口（transferrer 的关闭）。这两件补齐后，`destroy()` 就能
-当场释放 stash 与介质；在那之前，被销毁的分发器把它们留到 GC。
+**已实现（内存相）**：`destroy()` 已经把每个拷贝当场结束并让它出表，
+所以释放不再需要引用计数：它在源取消与在途 pull 落定之后
+`$I.DROP()` 内存相 stash——这就是「收摊」。调用当场完成的只有“结束
+所有拷贝”，封口与释放都随返回的 Promise 落地。
+
+**已实现**：两侧同一个动词——`$I.DROP()`（放开载体），都只由
+`destroy()` 触发：内存相放开 stash 里的块，降级相放开待写队列并放开介质。
+至于“没人要了就自动放开”，已明确**不做**：没有活跃 fork、但没
+`terminate()` 的分发器仍能 fork（只是进度落后），所以何时完全放开是
+宿主的决定，不是框架从“没人在看”推出来的。
+
+**未决**：读侧那套统一 close 动词——降级族 `$I.CLOSE` 已写好却失去
+了调用者，它的前途（接上或删掉）已记在代码的 TODO 里。
 `terminate()` 则什么也不释放（它只关闸门）。
 
 ## 背压
@@ -596,14 +606,17 @@ sequenceDiagram
   已建拷贝照旧运行——需要数据就继续向源拉取
 - **`destroy()`**：闸门 + 封口（前沿定长）+ 切断源 + **当场结束所有
   拷贝**。每个活体立刻收到 `error(终止原因)`——可辨识的 `AbortError`，
-  **不补**已缓冲的前缀（分级：`terminate` 对读侧不可见，`destroy` 当场可辨）
+  **不补**已缓冲的前缀（分级：`terminate` 对读侧不可见，`destroy` 当场可辨）。
+  当场只有“结束所有拷贝”这件事：封口与释放都在收摊的异步段里，
+  `destroy()` 返回**同一个** Promise（幂等），`await` 到的是源取消与在途
+  pull 落定之后的收场结果。
 
 不管哪种收场，每个拷贝拿到的始终是连续完整前缀（不会跳号、不会缺
 中间块），且“来晚了”的拷贝也能利用已缓冲数据完成部分工作。
 
 **实现**：`$I.TERMINATION` 只有三个读者——`fork()` 的闸门、`destroy()`
-取消源时给出的原因、`get terminated`。封口由 `destroy()` 按相位交给
-落点（`stash.$I.SET_DONE()` / `transferrer.$I.SET_DONE()`）。
+取消源时给出的原因、`get terminated`。封口由 `destroy()` 在收摊的异步
+段里按相位交给落点（`stash.$I.SET_DONE()` / `transferrer.$I.SET_DONE()`）。
 
 对拷贝流而言，收场只有两种形态：“流正常结束”与“流报错”——下游不
 关心原因时统一处理，需要区分时检查 `error.name`。
@@ -662,7 +675,8 @@ sequenceDiagram
 | `terminate` | 分发器可用性终结被调用 |
 
 源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。
-`destroy()`（强档）不另派事件：它是宿主动作，调用方本来就知道。
+`destroy()`（强档）不另派事件：它是宿主动作，调用方本来就知道——
+收摊何时完成看它返回的那个 Promise。
 
 ## 非目标
 

@@ -103,7 +103,7 @@ Promise"这一事实：
 - **写侧不阻塞**：`$I.WRITE` 入队即返回，`$I.DUMP` 同步返回——source
   的拉取不因"dump 还没完"停在一趟拉取上；活块在 dump 在途时照常
   进队列（队列无上限，积压处置归下游）。
-- **读侧只等自己那一位被接受**：`$I.WAIT_CHUNK(position)` 判的是
+- **读侧只等自己那一位被接受**：`$I.WAIT_POSITION(position)` 判的是
   `position < 水位 + 队列`；命中队列由抽象层直接交付（介质侧不参与、
   也不 init），已落介质的才走介质侧。
 - **落地即交接**：dump 成功时水位一次推满到 `stash.length`，同时**清掉
@@ -143,7 +143,7 @@ Promise"这一事实：
 > 自己 `DROP` 载体、清掉那 L 条、失败保留现场；`$I.WRITE` 入队即返回，单飞 drain 按
 > FIFO 落盘（先等 dump 落地，否则会把副本再写一遍）。读侧不再认识
 > dump：旧 dumping 屏障（`chunkStashDumping`）退役，改为统一位置门
-> `$I.WAIT_CHUNK(position)`（**接受度**：在介质上或在队列里都算可读），
+> `$I.WAIT_POSITION(position)`（**接受度**：在介质上或在队列里都算可读），
 > 策略 init 改惰性（首次读介质前），公开面随之去掉 `get dumping`。
 > 因此**降级改全同步**：一挥 `$I.DUMP` 即换读器，分发器不再 `await`
 > 任何东西。
@@ -181,7 +181,7 @@ Promise"这一事实：
     具体 reader 类静态声明写侧类 `_S.TRANSFERRER_CTOR`；实例
     由分发器在降级时构造并持有，交接给各拷贝读器（不再一次性守卫）。
   - **位置门（2026-09-16 取代 `chunkStashDumping`）**：读路径每次
-    `$I.WAIT_CHUNK($I.CONSUMED_CHUNK_COUNT)`；初始化链先 `await dumping`
+    `$I.WAIT_POSITION($I.CONSUMED_CHUNK_COUNT)`；初始化链先 `await dumping`
     （整份转移落地）再跑 `_I.INITIALIZE`。`get dumping` 是公开观察面，
     可读性不依赖它。
   - **不设 `_I.OPEN`**（已认可）：`OPEN` 是文件类降级的领域术语，
@@ -245,7 +245,7 @@ Promise"这一事实：
       已解：同 tick 换读器后无拷贝再碰 buffer。
 - [x] 降级读取器在 dump 完成前读取 → 读到不完整/半截数据
       已解（2026-09-16 换机制）：读侧不再认识 dump，改为统一位置门
-      `transferrer.$I.WAIT_CHUNK($I.CONSUMED_CHUNK_COUNT)`——`read()` 每次
+      `transferrer.$I.WAIT_POSITION($I.CONSUMED_CHUNK_COUNT)`——`read()` 每次
       先过门，`$I.REQUEST_INITIALIZE` 也在策略 init 前先过门（open/seek
       时介质必已存在）；dump / 写失败统一闩在 `I.ERROR`，门以之拒绝，
       所有（含迟到）消费者一致。

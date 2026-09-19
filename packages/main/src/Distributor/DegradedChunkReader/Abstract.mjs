@@ -67,7 +67,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     const transferrer = this[$I.TRANSFERRER];
     const position = this[_A.READER.A.$I.CONSUMED_COUNT];
 
-    await transferrer[TRANSFERRER.$I.WAIT_CHUNK](position);
+    await transferrer[TRANSFERRER.$I.WAIT_POSITION](position);
 
     const chunk = transferrer[TRANSFERRER.$I.PEEK](position);
 

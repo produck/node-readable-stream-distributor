@@ -28,6 +28,8 @@ const $I_DEGRADE = Symbol('.$degrade()');
 const $I_FORKED_READABLE_STREAM_REGISTRY = Symbol(
   '.$forkedReadableStreamRegistry',
 );
+const $I_DESTROYED = Symbol('.$destroyed');
+const $I_DESTROY = Symbol('.$destroy()');
 
 export const $I = deepFreeze({
   STASH_BYTE_LIMIT: $I_STASH_BYTE_LIMIT,
@@ -36,6 +38,8 @@ export const $I = deepFreeze({
   TRANSFERRER: $I_TRANSFERRER,
   SET_TRANSFERRER_ARGS: $I_SET_TRANSFERRER_ARGS,
   DEGRADE: $I_DEGRADE,
+  DESTROYED: $I_DESTROYED,
+  DESTROY: $I_DESTROY,
 });
 
 const S_DEGRADED_CHUNK_READER_CTOR = Symbol('._degradedChunkReaderCtor');

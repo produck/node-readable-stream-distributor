@@ -5,9 +5,9 @@ import { $I, _I, A } from './_Symbol.mjs';
 class AbstractChunkReader {
   [A.$I.CONSUMED_COUNT] = 0;
 
-  constructor(sourceConsumptionAgent, chunkStash) {
-    this[A.I.AGENT] = sourceConsumptionAgent;
-    this[A.$I.STASH] = chunkStash;
+  constructor(agent, stash) {
+    this[A.I.AGENT] = agent;
+    this[A.$I.STASH] = stash;
   }
 
   async [$I.READ]() {

@@ -115,7 +115,8 @@
   （初值 `BufferChunkReader`，降级换读器的同一同步块里翻成策略类，后者
   当场 `$I.REQUEST_INITIALIZE(0)` 播种）；`get degraded`（代理消费代理的
   相位事实）；`get terminated`（`$I.TERMINATION` 是否已落）；
-  `terminate()`（只关闸门，幂等）；`destroy()`（关闸门 + 封口 + 切断源）。
+  `terminate()`（只关闸门，幂等）；`destroy()`（关闸门 + 封口 + 切断源
+  - 收摊；幂等，返回同一个 Promise）。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
   `ChunkStash`）· `$I.STASH_BYTE_LIMIT`（阈值，构造器唯一写入）·
   `I.SOURCE_CONSUMPTION_AGENT`（消费代理）·
@@ -130,8 +131,8 @@
   `$I.SET_TRANSFERRER_ARGS(...)`（落 `I.TRANSFERRER_ARGS`，分发器只存转、
   不解释）。构造校验 source 为未锁定的 WHATWG ReadableStream。
 - 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（push /
-  `$I.SEAL()` / `$I.SET_DONE()`）归 `SourceConsumptionAgent`，dump→drop
-  归分发器。
+  `$I.SEAL()` / `$I.SET_DONE()`）归 `SourceConsumptionAgent`；dump→drop
+  归写侧（`START_DUMPING` 成功自己 DROP），内存相的 drop 归 `destroy()`。
 - 降级：**触发在消费代理**（stash 字节超过构造时定下的阈值），**执行在分发器** `$I.DEGRADE`——
   构造写侧实例（按读器家族 `_S.TRANSFERRER_CTOR` + 预置构造参数）、
   执行其 `dump`、遍历 registry、选降级 reader 类、换掉各 fork 的读取器
@@ -146,16 +147,37 @@
   已建拷贝照旧运行）；`destroy()` = 闸门 + **封口**（前沿定长）+ **切断源**
   - **当场结束所有拷贝**（`error(终止原因)`，不补缓冲）。读侧观感：
     `terminate` 对拷贝不可见，`destroy` 立刻给出可辨识的 `AbortError`。
-- **`destroy()` 骨架**：`terminate()` → 按相位封口（`$I.TRANSFERRER` 为
-  `null` 就是 stash `$I.SET_DONE`，否则是 transferrer `$I.SET_DONE`）
-  → **遍历注册表当场结束每个拷贝**（`controller.error(终止原因)` +
-  `prune`，不补已缓冲的前缀）→ `SOURCE_READER.cancel(终止原因)`（不
-  await；失败只派 `warn('source-cancel-failed')`）。四步各自幂等
-  （`terminate` 有守卫、封口是置位、对已 errored 的流再 error 是规范
-  no-op、cancel 有守卫），所以二次 `destroy()` 天然无害。**不**清表、
-  **不** `$I.DROP()`：出表是逐个 `prune`（与 fork 自己两个出口同一形态，
-  这里是宿主代拷贝收场）。**未做**：读侧统一 close 动词与介质释放
-  ——`destroy()` 已经把拷贝全结束，所以这两件不再需要引用计数。
+- **`destroy()` 骨架**：`destroy()` 是**幂等包装**（`$I.DESTROYED` 缓存
+  同一个 Promise，`await` 几次也只跑一遍），实体在受保护的
+  `async $I.DESTROY()`，分两段：
+  - **同步段**（调用当场、不可逆、可辨识）：`terminate()` → 遍历注册表
+    **当场结束每个拷贝**（`controller.error(终止原因)` + `prune`，不补
+    已缓冲的前缀）。
+  - **异步段**（Promise 落地时才完成）：`await SOURCE_READER.cancel(终止
+原因)`（失败只派 `warn('source-cancel-failed')`，不打断收摊）→ 等在途
+    那一笔落定 → **按此刻的相位收场**：两侧同形——`$I.SET_DONE()`（封口）
+    - `$I.DROP()`（放开载体）；内存相放开的是 stash 里的块，降级相放开的
+      是待写队列与介质句柄。所以只有“拷贝全被 error”是当场的，
+      **封口与放开都不在调用当场**。
+- **两个位置的陷阱**（都实测过）：
+  - 等在途 pull **必须在 `cancel` 之后**：在途的 `read()` 只有 cancel 能
+    解（源不再出声时它就一直挂着），放在前面 `destroy()` 直接死锁。
+  - 在途 pull 的拒绝**要吞掉**：源在 destroy 同一刻报错时，重新 await
+    到的是那个源错误；不吞则整个异步段中断——封口与释放都不发生，
+    `destroy()` 还返回一个拒绝的 Promise。该错误仍由读侧（拷贝的
+    `ensure`）收，分流与之前一致。
+- **相位只读一次**（在所有异步都结束之后）：`cancel` 一被调用
+  `finished` 即为真，之后 `ensure` 不可能再起新的一趟 pull，而在途那一笔
+  刚被等过——相位在收场那一刻已经冻结，无需快照 + 重读。
+- **释放不等拷贝**：拷贝的读面在 `error()` 之后不可达（流不会再调
+  `pull` 钩子），在途的那次 `$I.ENSURE_THEN_READ` 若落在 DROP 之后，
+  只会得到一个被流吞掉的拒绝，读侧观感不变。
+- **已完成**：两相都随 `$I.DROP()` 放开（内存相的块 / 降级相的队列与
+  介质句柄，见 Transferrer 一节），术语与 `ChunkStash.$I.DROP()` 对齐。
+- **未做**：读侧那套统一 close 动词——降级族 `$I.CLOSE` 已写好，但
+  destroy-only 的释放策略让它失去了唯一的前途：它的调用者本应是
+  “没人要了就自动关”的计数路线，而那条路线被否了。它的去向是个待决项
+  （接或删），已记在 `$I.DESTROY()` 的 TODO 里。
 
 ### SourceConsumptionAgent（消费代理）
 
@@ -265,7 +287,7 @@
   入参就是它）与 `get closed`。除此之外不开口——位置是家族的记账，
   策略只见"跨一条边界"。
 - `$I.TRANSFERRER` 是降级时由分发器交接的那个写侧实例（基类构造第三
-  个参数）；读侧原语 `$I.WAIT_CHUNK(position)` / `$I.PEEK(position)`
+  个参数）；读侧原语 `$I.WAIT_POSITION(position)` / `$I.PEEK(position)`
   由它取。
 - **请求初始化**：`$I.REQUEST_INITIALIZE(progress)` 同步播种位置，并把
   `I.INITIALIZED` 置为链体 `I.INITIALIZE`：等 `get dumping`（整份转移
@@ -298,7 +320,7 @@
 - `CONSUMED_CHUNK_COUNT` 只在介质侧交出内容时前进，因此总是"下一个要取的位置"；
   终态那次读不推进。降级定位拿它做 skip 依赖这一点。
 - 降级读法：**不覆写 `$I.READ` / `$I.ENSURE_THEN_READ`、不走 super**，直接实现
-  `AbstractChunkReader._I.READ`：过门 `$I.WAIT_CHUNK(位置)` → 队列命中
+  `AbstractChunkReader._I.READ`：过门 `$I.WAIT_POSITION(位置)` → 队列命中
   （`$I.PEEK` 有值）**直接交付、不碰介质侧，也不推进已跨数** → 否则
   （已落介质 / 到头）走 `I.READ_BACK()` **读回**：先 await 就位点
   `I.INITIALIZED`（链：open + 进度同步）→ `I.SYNC()` 补差 → 转发自家
@@ -339,7 +361,7 @@
 - `AbstractDegradedChunkReader` 纯读；写侧抽为家族内部抽象
   `AbstractTransferrer`。**无阻塞调度的复杂性全在此作用域**：外部只
   挥手与转发，不再判断"何时降级 / dump 何时落地"。
-- 三个驱动（受保护，只给分发器与 agent）：
+- 四个驱动（受保护，只给分发器与 agent）：
   - `$I.DUMP(chunkStash)` — 交出整份 stash（不含封存）。**同步返回**：它
     **接管** stash 的整份块列表（同一批对象，只加引用，不复制）——此刻
     队列必空，因为 `$I.DUMP` 是队列的第一个写入者（transferrer 刚在
@@ -354,16 +376,32 @@
     外露（调试看符号表）。
   - `$I.SET_DONE()` — 源已尽的落点；置位并结算门（终值冻结会改变
     "可读"判定）。
+  - `$I.DROP()` — **放开载体**（2026-09-19 定，语义与 `ChunkStash.$I.DROP`
+    对齐）：置 `I.DROPPED`、把 `I.PENDING_CHUNKS` 置空（那份没写完的东西
+    我不再持有）、并调抽象 `_I.DROP()` 放开介质。**只由 `destroy()`
+    触发**：没有活跃 fork 但未 `terminate()` 的分发器仍能 fork（只是进度
+    落后而已），所以“何时完全放开”归宿主——没人要了不等于不能再用。
+    与 stash 两处同规：**二次调用抛**（`I.ASSERT_NOT_DROPPED` →
+    `Transferrer has been dropped`，不是幂等）、**放开即断访问**
+    （`$I.WRITE` / `$I.PEEK` / `$I.WAIT_POSITION` 都先断言）。一处不同：介质
+    那半是**发起式**——不 `await` `_I.DROP()`（返回值仅用来吞掉拒绝），
+    也不等 drain 收尾（死盘会让 `dumping` 永不落地，而 destroy 不许被拖
+    住）；stash 那半是完成式（同步清干净）。它也**不**替分发器封口：
+    `SET_DONE()` 由 `destroy()` 先调，拿到的是“先定长后放开”。
+- **放开后的写侧收手**：drain 不需要额外的标志位——队列被置空，下一圈
+  自然退出（在途那一笔照旧落介质，落不回来的不管）。`I.FAIL` 改为**首次
+  错误优先**，放开后介质抛出的次生失败不再覆盖源错误 / dump 失败。在途
+  的 `_I.DUMP` **不打断**：宿主若要提前收手，自己查 `get dropped`。
 - 串行链 `I.DRAIN` 单飞：先等 `I.DUMPING` 落地（不然会把接管的这 L 条
   再写一遍），再按 FIFO 一块一块写队列，写一块推一格水位。于是
   "活块永远排在 dump 之后"天然成立。
-- 读侧原语（受保护）：`$I.WAIT_CHUNK(position)` = 等到该位**已被接受**
+- 读侧原语（受保护）：`$I.WAIT_POSITION(position)` = 等到该位**已被接受**
   （`position < 水位 + 队列`）或**永远不会有块**（done）；终态错误以
   `I.ERROR` 拒绝。`$I.PEEK(position)` 给出**还在队列里**的那一块
   （越界/已落介质则 `undefined`，由介质侧判）。等待靠登记表：
-  `I.PENDING_RELEASES` = `Map<resolve, position>`——键是这一位的放行指令，
+  `I.WAITING_POSITION_TABLE` = `Map<resolve, position>`——键是这一位的放行指令，
   值是它等的位。
-  `$I.WAIT_CHUNK` 登记后立刻结算一次；改变可读判定的四处（入队、dump
+  `$I.WAIT_POSITION` 登记后立刻结算一次；改变可读判定的四处（入队、dump
   落地、`SET_DONE`、`FAIL`）各调一次 `I.SETTLE()`，由它按
   `position < 水位 + 队列` 或 `DONE` / `ERROR` 放行够号的——没有广播，
   也没有各自重判。drain 落盘**不**结算：对 `total = 水位 + 队列`
@@ -381,9 +419,10 @@
   让"放行点只有一处"一眼可见。`I.SETTLE` 首行空表早返回。
 - **纯内部对象**：实例由分发器私有持有，**不开观察面**——要看就进
   调试器按符号表读成员（`I.PENDING_CHUNKS` / `I.WRITTEN_CHUNK_COUNT` /
-  `I.PENDING_RELEASES` / `I.DRAINING` / `I.DONE` / `I.ERROR` /
-  `I.DUMPING`）。对家族只留一个读入口：`get dumping`
-  （初始化链等的就是它落地），其余交互全走 `$I` 原语。
+  `I.WAITING_POSITION_TABLE` / `I.DRAINING` / `I.DONE` / `I.ERROR` /
+  `I.DUMPING`）。对家族留两个读口：`get dumping`（初始化链等的就是它
+  落地）与 `get dropped`（宿主在 `_I.DUMP` / `_I.WRITE` 里提前收手看
+  它），其余交互全走 `$I` 原语。
 - 实例与 `ChunkStash` 1:1，因此状态就是普通字段，不再用 WeakMap /
   WeakSet 按 stash 键控。抽象钩子 `_I.DUMP` / `_I.WRITE` 由下游实现。
 - 完成标志 `$I.SET_DONE()` / `get done` 与 stash 侧 `$I.SET_DONE()` /

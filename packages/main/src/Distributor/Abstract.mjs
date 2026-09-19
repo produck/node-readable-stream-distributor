@@ -15,6 +15,8 @@ import * as Parser from './Parser.mjs';
 import { I, $I, _S, A } from './_Symbol.mjs';
 import { _A, TRANSFERRER } from './_External.mjs';
 
+const TERMINATION_MESSAGE = 'The distributor has been terminated';
+
 class ReadableStreamDistributor extends EventTarget {
   [A.I.STASH] = new ChunkStash.Concrete();
   [A.$I.REGISTRY] = new ForkedReadableStreamRegistry();
@@ -22,9 +24,10 @@ class ReadableStreamDistributor extends EventTarget {
   [A.$I.LIMIT] = 0;
   [I.TRANSFERRER_ARGS] = [];
   [$I.TRANSFERRER] = null;
+  [$I.DESTROYED] = null;
   [A.I.CTOR.READER.CURRENT] = BufferChunkReader.Concrete;
 
-  constructor(source, stashByteLimit = 1024 ** 3) {
+  constructor(source, limit = 1024 ** 3) {
     super();
 
     if (!Checker.isReadableStreamLike(source)) {
@@ -32,7 +35,7 @@ class ReadableStreamDistributor extends EventTarget {
     }
 
     this[I.CTOR] = new.target;
-    this[A.$I.LIMIT] = Parser.NonNegativeInteger(stashByteLimit);
+    this[A.$I.LIMIT] = Parser.NonNegativeInteger(limit);
     this[A.I.SOURCE] = new SourceReader.Concrete(source);
     this[A.I.AGENT] = new SourceConsumptionAgent(this);
   }
@@ -121,25 +124,22 @@ class ReadableStreamDistributor extends EventTarget {
       return;
     }
 
-    const message = 'The distributor has been terminated';
-    const termination = new DOMException(message, 'AbortError');
-
-    this[$I.TERMINATION] = termination;
+    this[$I.TERMINATION] = new DOMException(TERMINATION_MESSAGE, 'AbortError');
     this.dispatchEvent(new Event.Terminate());
   }
 
   destroy() {
-    this.terminate();
-
-    const transferrer = this[$I.TRANSFERRER];
-    const registry = this[A.$I.REGISTRY];
-
-    if (transferrer === null) {
-      this[A.I.STASH][_A.STASH.$I.SET_DONE]();
-    } else {
-      transferrer[TRANSFERRER.$I.SET_DONE]();
+    if (this[$I.DESTROYED] === null) {
+      this[$I.DESTROYED] = this[$I.DESTROY]();
     }
 
+    return this[$I.DESTROYED];
+  }
+
+  async [$I.DESTROY]() {
+    this.terminate();
+
+    const registry = this[A.$I.REGISTRY];
     const termination = this[$I.TERMINATION];
 
     for (const [forked, controller] of registry) {
@@ -147,13 +147,25 @@ class ReadableStreamDistributor extends EventTarget {
       registry.prune(forked);
     }
 
-    this[A.I.SOURCE].cancel(termination).catch((cause) => {
+    await this[A.I.SOURCE].cancel(termination).catch((cause) => {
       this.dispatchEvent(new Event.Warn('source-cancel-failed', cause));
     });
 
-    // TODO: release the read side and the medium once every copy is ended —
-    //   the read device has no uniform close verb yet, and the write side has
-    //   no release member.
+    await Promise.resolve(this[A.I.AGENT].pulling).catch(() => {});
+
+    const transferrer = this[$I.TRANSFERRER];
+    const stash = this[A.I.STASH];
+
+    if (transferrer === null) {
+      stash[_A.STASH.$I.SET_DONE]();
+      stash[_A.STASH.$I.DROP]();
+    } else {
+      transferrer[TRANSFERRER.$I.SET_DONE]();
+      transferrer[TRANSFERRER.$I.DROP]();
+    }
+
+    // TODO: decide the fate of the degraded reader's `$I.CLOSE` - the
+    //   destroy-only release policy took away its only prospective caller.
   }
 }
 

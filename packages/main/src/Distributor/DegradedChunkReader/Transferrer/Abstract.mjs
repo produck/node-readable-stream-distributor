@@ -9,32 +9,42 @@ const noop = () => {};
 class AbstractTransferrer {
   [A.I.WRITTEN_COUNT] = 0;
   [I.PENDING_CHUNKS] = [];
-  [I.PENDING_RELEASES] = new Map();
+  [I.WAITING_POSITION_TABLE] = new Map();
   [I.DRAINING] = null;
   [I.DUMPING] = null;
   [I.ERROR] = null;
   [I.DONE] = false;
+  [I.DROPPED] = false;
+
+  [I.ASSERT_NOT_DROPPED]() {
+    if (this[I.DROPPED]) {
+      Ow.Error.Common('Transferrer has been dropped');
+    }
+  }
 
   [I.SETTLE]() {
-    const pendingReleases = this[I.PENDING_RELEASES];
+    const waitingPositions = this[I.WAITING_POSITION_TABLE];
 
-    if (pendingReleases.size === 0) {
+    if (waitingPositions.size === 0) {
       return;
     }
 
     const total = this[A.I.WRITTEN_COUNT] + this[I.PENDING_CHUNKS].length;
     const isTerminal = this[I.DONE] || this[I.ERROR] !== null;
 
-    for (const [release, position] of pendingReleases) {
+    for (const [release, position] of waitingPositions) {
       if (position < total || isTerminal) {
-        pendingReleases.delete(release);
+        waitingPositions.delete(release);
         release();
       }
     }
   }
 
   [I.FAIL](cause) {
-    this[I.ERROR] = cause;
+    if (this[I.ERROR] === null) {
+      this[I.ERROR] = cause;
+    }
+
     this[I.SETTLE]();
   }
 
@@ -63,14 +73,14 @@ class AbstractTransferrer {
     this[I.DRAINING] = null;
   }
 
-  async [I.START_DUMPING](chunkStash) {
-    this[I.PENDING_CHUNKS] = [...chunkStash.chunks()];
+  async [I.START_DUMPING](stash) {
+    this[I.PENDING_CHUNKS] = [...stash.chunks()];
 
-    const { length } = chunkStash;
+    const { length } = stash;
 
     try {
-      await this[_I.DUMP](chunkStash);
-      chunkStash[_A.STASH.$I.DROP]();
+      await this[_I.DUMP](stash);
+      stash[_A.STASH.$I.DROP]();
       this[I.PENDING_CHUNKS].splice(0, length);
       this[A.I.WRITTEN_COUNT] = length;
       this[I.SETTLE]();
@@ -83,11 +93,13 @@ class AbstractTransferrer {
     }
   }
 
-  [$I.DUMP](chunkStash) {
-    return (this[I.DUMPING] = this[I.START_DUMPING](chunkStash));
+  [$I.DUMP](stash) {
+    return (this[I.DUMPING] = this[I.START_DUMPING](stash));
   }
 
   [$I.WRITE](chunk) {
+    this[I.ASSERT_NOT_DROPPED]();
+
     if (this[I.ERROR] !== null) {
       Ow.throw(this[I.ERROR]);
     }
@@ -100,10 +112,12 @@ class AbstractTransferrer {
     }
   }
 
-  async [$I.WAIT_CHUNK](position) {
+  async [$I.WAIT_POSITION](position) {
+    this[I.ASSERT_NOT_DROPPED]();
+
     const { promise, resolve } = Promise.withResolvers();
 
-    this[I.PENDING_RELEASES].set(resolve, position);
+    this[I.WAITING_POSITION_TABLE].set(resolve, position);
     this[I.SETTLE]();
     await promise;
 
@@ -113,12 +127,22 @@ class AbstractTransferrer {
   }
 
   [$I.PEEK](position) {
+    this[I.ASSERT_NOT_DROPPED]();
+
     return this[I.PENDING_CHUNKS][position - this[A.I.WRITTEN_COUNT]];
   }
 
   [$I.SET_DONE]() {
     this[I.DONE] = true;
     this[I.SETTLE]();
+  }
+
+  [$I.DROP]() {
+    this[I.ASSERT_NOT_DROPPED]();
+    this[I.DROPPED] = true;
+    this[I.PENDING_CHUNKS] = [];
+
+    Promise.resolve(this[_I.DROP]()).catch(noop);
   }
 
   get dumping() {
@@ -132,6 +156,10 @@ class AbstractTransferrer {
   get error() {
     return this[I.ERROR];
   }
+
+  get dropped() {
+    return this[I.DROPPED];
+  }
 }
 
 export default Abstract(
@@ -139,5 +167,6 @@ export default Abstract(
   Abstract({
     [_I.DUMP]: M.Method(),
     [_I.WRITE]: M.Method(),
+    [_I.DROP]: M.Method(),
   }),
 );
