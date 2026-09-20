@@ -361,6 +361,20 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
   `CONSUMED_CHUNK_COUNT++`，原样返回读结果；带 ensure 的驱动入口是
   `$I.ENSURE_THEN_READ`（它只是在这句前面加一次 `await ensure(...)`），
   也是 `pull` 调的那个；`done` 的含义不归它。
+- **形状归声明（2026-09-20 定）**：非终态**必带块**；`{done:false,`
+  `value: undefined}` 这种"洞形"由 `ChunkReader/Parser.ReadableStreamResult`
+  作 `_I.READ` 的返回描述（`M.Method().returns(M.OrPromiseLike(...))`），
+  两家族都挂——**规格描述不进生产**：生产构建把
+  `@produck/es-abstract-token` 换成它的 `./erase` 入口（`Abstract` 退化成
+  恒等 `any => any`），声明被丢、member 包装不再安装，dev/test 才在调用点
+  校验（es-abstract 的访问/调用期校验）。所以"两家族都写"不是白付，也不
+  存在"把断言写进热路径"的交易。理由：默认流的规范其实允许 `undefined`
+  块，但本包的块是 `Buffer`，"洞"冒充数据比报错坏；正确的宿主在被问到时
+  本来就有货（位置被接受 = 队列里有或已落介质）。想表达"记录在但没 body"
+  就交**零长 Buffer**。旧 TODO 里"介质侧可答
+  `{value: undefined, done: false}`"那条许可作废。内存族那个角（源被
+  cancel 而没 done 时 `stash.done` 仍假）今天不可达——`destroy()` 先 error
+  掉所有 fork 才 cancel 源；真到了那天得在内存族自己收口。
 - **`done` 归介质侧**：内存路径 = `stash.done && index >= stash.length`
   （存储层终态 + 自己的 backlog 闸）；文件路径 = 介质末尾标志 + 位置。
 - 前沿不往下传：降级相位 `ensure()` 只保证"目标已拉取"（落点在队列或
@@ -375,9 +389,6 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
   `I.INITIALIZED`（链：open + 进度同步）→ `I.SYNC()` 补差 → 转发自家
   `_I.READ`，非终态把 `I.SEEKED_CHUNK_COUNT` 推进一格。基类驱动对降级实例
   天然成立；介质侧只见降级 `_I` 空间。
-- 门的语义是**接受度**：该位在介质上或在队列里就算可读，"到头"也算
-  可读（介质侧回终态）。它**不等整份 dump**——实测 dump 30ms 在途时新建
-  fork 首读 1ms，整条 20 块的流只碰介质 1 次。
 - 门的语义是**接受度**：该位在介质上或在队列里就算可读，"到头"也算
   可读（介质侧回终态）。它**不等整份 dump**——实测 dump 30ms 在途时新建
   fork 首读 1ms，整条 20 块的流只碰介质 1 次。
@@ -399,7 +410,8 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
   原处，下一笔落介质前由 `I.SYNC()` 一并补上。
 - **介质契约**：第 i 条记录对应共享序列第 i 位——`$I.DUMP` 交出的是整份
   stash（不裁剪，index 即绝对位置），所以介质侧实现出生在序列第 0 位。二进制
-  布局（长度前缀、对齐、要不要索引）全归策略，家族不假设。
+  布局（长度前缀、对齐、要不要索引）全归策略，家族不假设。**非终态必须
+  交块**（要空就交零长 Buffer，洞形由 parser 拒）。
 - 位置只前进：读者逐位消费，介质侧服务过的位置单调递增，故 `I.SYNC` 只需
   前扫；回退只能是契约违规。
 - `_I.INITIALIZE` 里只做 open（不许在 init 里做定位，那是驱动器的事）；

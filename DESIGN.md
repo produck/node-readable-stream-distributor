@@ -377,6 +377,10 @@ interface ChunkReader {
   且只在真的交出内容时前进——它总是"下一个要取的位置"。
 - **不解释 `done`**：`done` 的含义与判定都归介质侧，它只借这个标志决定是否推进，
   并原样转发结果的形状。
+- **形状归声明，由 es-abstract 管**：非终态必带块——`_I.READ` 的返回描述是
+  `ChunkReader/Parser.ReadableStreamResult`（两家族都挂）；生产构建经
+  `@produck/es-abstract-token/erase` 擦掉规格描述，所以只在 dev/test 校验。
+  理由见 DEV「读路径」。
 - 降级家族**不覆写** `$I.READ`、也不走 `super`，只在 `_I.READ` 里
   `await` 初始化后转发自家 `_I.READ`；基类驱动对它们天然成立。
 

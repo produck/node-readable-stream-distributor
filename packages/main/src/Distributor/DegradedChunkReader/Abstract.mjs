@@ -105,7 +105,9 @@ export default Abstract(
     //   answering `false` when the medium has no record left to cross; the
     //   driver drives it until that answer. `_I.READ` then serves the record
     //   the medium-side cursor stands on — that step is the read-back.
-    [_I.READ]: M.Method().returns(M.OrPromiseLike(/* { done, value } */)),
+    [_I.READ]: M.Method().returns(
+      M.OrPromiseLike(ChunkReader.Parser.ReadableStreamResult),
+    ),
     [_I.INITIALIZE]: M.Method().returns(M.OrPromiseLike(M.Undefined)),
     [_I.CLOSE]: M.Method().returns(M.OrPromiseLike(M.Undefined)),
     [_I.SEEK]: M.Method().returns(M.OrPromiseLike(M.Boolean)),

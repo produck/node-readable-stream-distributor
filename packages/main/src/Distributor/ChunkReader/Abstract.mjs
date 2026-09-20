@@ -1,6 +1,7 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import { $I, _I, A } from './_Symbol.mjs';
+import * as Parser from './Parser.mjs';
 
 class AbstractChunkReader {
   [A.$I.CONSUMED_COUNT] = 0;
@@ -32,13 +33,6 @@ class AbstractChunkReader {
 export default Abstract(
   AbstractChunkReader,
   Abstract({
-    // TODO: medium-side obligations still to be enforced here —
-    //   - answer `done: true` only once the stash is sealed
-    //     (`A.STASH.$I.SEALED`), never just because nothing is readable yet;
-    //   - the medium side may answer `{ value: undefined, done: false }` at the
-    //     frontier;
-    //   - on source error, reject with a distinguishable error so the
-    //     consumer stream errors automatically.
-    [_I.READ]: M.Method().returns(M.OrPromiseLike()),
+    [_I.READ]: M.Method().returns(M.OrPromiseLike(Parser.ReadableStreamResult)),
   }),
 );
