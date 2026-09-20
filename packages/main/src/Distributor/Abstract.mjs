@@ -41,7 +41,7 @@ class ReadableStreamDistributor extends EventTarget {
   }
 
   get degraded() {
-    return this[A.I.AGENT].degraded;
+    return this[$I.TRANSFERRER] !== null;
   }
 
   get terminated() {
@@ -100,6 +100,14 @@ class ReadableStreamDistributor extends EventTarget {
     const agent = this[A.I.AGENT];
     const stash = this[A.I.STASH];
     const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
+
+    // TODO: the edge policy - "past the limit and the source already ended"
+    //   switches today, as a consequence of the probe running on every pull;
+    //   make it a declaration the host can set (an _S entry or a protected
+    //   member) once a second value has a user.
+    if (stash.done) {
+      transferrer[TRANSFERRER.$I.SET_DONE]();
+    }
 
     transferrer[TRANSFERRER.$I.DUMP](stash).catch((cause) => {
       this.dispatchEvent(new Event.Warn('dump-failed', cause));

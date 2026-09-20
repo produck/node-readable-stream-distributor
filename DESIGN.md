@@ -31,7 +31,7 @@
 
 - 内存→介质阈值：构造参数 `stashByteLimit`（默认 `1GiB`），构造时校验并
   落进受保护字段 `$I.STASH_BYTE_LIMIT`，此后只读
-- `get degraded` → 代理 `SourceConsumptionAgent` 的相位事实
+- `get degraded` → 观察 `$I.TRANSFERRER`（相位只有一个事实来源）
 - `[_S.DEGRADED_CHUNK_READER_CTOR]` → 策略侧给出的降级读取器类，degrade
   时用它就地构造各 fork 的新读取器
 - 新 `fork()` 的读器取自当前相位字段 `I.CURRENT_CHUNK_READER_CTOR`（初值
@@ -168,6 +168,7 @@ classDiagram
         +distributor
         +ensure(target)
         +toStash(chunk, done)
+        +degradeIfNeeded()
         +toTransferrer(chunk, done)
     }
 
@@ -466,6 +467,14 @@ sequenceDiagram
     DIST->>B: 回放 chunks 3-10 → 无缝切换到 chunk 11..
 ```
 
+**边界策略写在 `$I.DEGRADE` 里**：阈值判据（`degradeIfNeeded()`）在 `pull()`
+里跑，**对 `done` 那一趟也跑**，所以“达到上限且源已到头”**照样切换**——
+限额不因为源到头就失效。切换的执行因此必须自己把状态交代清楚，第一条就是
+**终态随交接走**：stash 已 `done` 就先给新落点 `$I.SET_DONE()`，否则读器会在
+前沿等一个永不来的下一笔（旧写法把判据塞在 `toStash` 末尾、只对 `PUSH` 跑，
+所以“不切换”只是碰巧，不是策略）。失败也不锁死：判据每趟都跑，宿主修好之后
+下一趟就重新尝试。
+
 ## 读写协调
 
 分发器不感知"落盘"——写入降级存储是**降级策略**的实现细节（呼应
@@ -657,7 +666,8 @@ sequenceDiagram
 
 - 内存缓冲当前字节 / 块数：`CHUNK_STASH`（ChunkStash）的
   `byteLength` / `length`，由缓冲容器自管。
-- 是否进入降级：`distributor.degraded`（代理消费代理的相位事实）。
+- 是否进入降级：`distributor.degraded`（观察 `$I.TRANSFERRER` 是否已
+  落位——相位只有一个事实来源）。
 - 源侧终局：`SOURCE_READER`（SourceReader）的 `done` / `error` /
   `cancelled`——源到头 / 源出错 / 我们收摊，三个终局互斥穷尽。
 - 是否已终结可用性：`distributor.terminated`；终止原因看受保护的

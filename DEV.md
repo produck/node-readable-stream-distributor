@@ -113,8 +113,9 @@
   `ForkedReadableStream`（`label` 助记符，默认占位串 `'<UNDEFINED>'`，
   须为 string）——读器取自当前相位字段 `I.CURRENT_CHUNK_READER_CTOR`
   （初值 `BufferChunkReader`，降级换读器的同一同步块里翻成策略类，后者
-  当场 `$I.REQUEST_INITIALIZE(0)` 播种）；`get degraded`（代理消费代理的
-  相位事实）；`get terminated`（`$I.TERMINATION` 是否已落）；
+  当场 `$I.REQUEST_INITIALIZE(0)` 播种）；`get degraded`（观察自己的
+  `$I.TRANSFERRER` 是否落位——相位只有一个事实来源）；`get terminated`
+  （`$I.TERMINATION` 是否已落）；
   `terminate()`（只关闸门，幂等）；`destroy()`（关闸门 + 封口 + 切断源
   - 收摊；幂等，返回同一个 Promise）。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
@@ -137,6 +138,23 @@
   构造写侧实例（按读器家族 `_S.TRANSFERRER_CTOR` + 预置构造参数）、
   执行其 `dump`、遍历 registry、选降级 reader 类、换掉各 fork 的读取器
   都留在结构侧。
+- **相位边界的三个决定各有一个显式位置**：写入分支在 `pull()`（问
+  `distributor.degraded`）、阈值判据在 `degradeIfNeeded()`、**交接与终态播种在
+  `$I.DEGRADE`**。旧的写法把判据塞在 `toStash` 末尾，于是“达到上限又遇到
+  `done` 时不切换”是**位置带来的副作用**，没人声明过；现在判据对 `done` 那一趟
+  也跑，那条边界就是显式的了：“达到上限且源已到头 → **照样切换**”（限额不
+  因为源到头就失效），代价是切换得自己交代状态——**终态随交接走**：stash 已
+  `done` 就先给新 transferrer `$I.SET_DONE()`，否则读器会在前沿等一个永不来的
+  下一笔（实测 `logs/probe-degrade-after-done.mjs`）。失败也不锁死：判据每趟都
+  跑，宿主修好之后下一趟重新尝试。
+- **可后加的第四个决定（未做，2026-09-20 留档；代码里有对应 TODO）**：
+  “达到上限且源已到头”时
+  **切还是不切**，可以做成一个开关（判据里读 `stash.done` + 一个策略位，
+  `_S` 静态或受保护方法都行）。现在这条边界只有一个合法值（照切），没有
+  使用者就先不开口；判据已经收在 `degradeIfNeeded()` 一处，加开关就是那里
+  多一个 `if`——而且“不切”那一支**不需要交代任何状态**（stash 仍是落点、
+  自己的 `done` 也在自己身上），所以开关本身没有隐藏义务。届时 DESIGN 那句
+  “限额不因为源到头就失效”要跟着改成“默认如此、可关”。
 - **`terminate()` 的契约**：幂等（已终结即返回）；终止原因落
   `$I.TERMINATION`（`DOMException`，`name` 为 `AbortError`）；派
   `terminate` 事件。**它只关闸门**：此后 `fork()` 抛错，除此外什么都不动——
@@ -183,8 +201,16 @@
 
 - 角色：**唯一的源消费方**（`pulling` 单飞，所有等待者共享同一趟拉取）
   与**唯一的落点写入者**——“源的事实”经它交给落点。降级的**触发**也在
-  这里（stash 字节超阈值 → `$I.SEAL()` + `degraded = true` →
-  `distributor.$I.DEGRADE()`；执行仍在结构侧，见 Distributor 一节）。
+  这里，单独一个成员 `degradeIfNeeded()`（stash 字节超阈值 → `$I.SEAL()`
+  → `distributor.$I.DEGRADE()`；执行仍在结构侧，见 Distributor 一节）
+  ——落点写入（`toStash` / `toTransferrer`）与切换策略分开写，阈值这种
+  分发器策略一眼看得见。
+- **相位只有一个事实来源**：`distributor.degraded` 观察自己的
+  `$I.TRANSFERRER` 是否落位，代理不再发这个事实（也不自己持
+  `degraded` 字段），`pull()` 的分支直接问分发器——两份真相会在降级
+  失败时分叉（`DEGRADE` 抛错则 transferrer 从未落位，而旧字段已置真），
+  后果是后续每趟 pull 都拿 `null[…]` 的 TypeError 顶掉真正的原因
+  （实测见 `logs/probe-degrade-failure.mjs`）。
 - `ensure(target)` 契约：返回时目标位置已可读，或落点已封口；源报错则
   拒绝；内部发生的切换已落地。
   - 循环只认一个判据：`!sourceReader.finished`（源还能不能拉）。
@@ -378,7 +404,12 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
     待写队列并确保 drain 在途。队列**无上限**，积压处置归下游；计数不
     外露（调试看符号表）。
   - `$I.SET_DONE()` — 源已尽的落点；置位并结算门（终值冻结会改变
-    "可读"判定）。
+    "可读"判定）。交接时若 stash 已 `done`，分发器先替它置位（终态随交接走，
+    否则源头到头那一刻才降级就会留下一份在前沿白等的拷贝）。它**只冻结
+    内存里的终值**，不在介质里留状态标记：定 `SET_DONE` 时就一并定了——
+    进程一旦死掉，介质里的标记同样恢复不了，标记没有收益。介质的收尾
+    （要不要尾部记录、要不要未完成标记）归宿主，它在 `_I.DROP` 里读
+    `get done` 就能区分“到头”与“被中断”。
   - `$I.DROP()` — **放开载体**（2026-09-19 定，语义与 `ChunkStash.$I.DROP`
     对齐）：置 `I.DROPPED`、把 `I.PENDING_CHUNKS` 置空（那份没写完的东西
     我不再持有）、并调抽象 `_I.DROP()` 放开介质。**只由 `destroy()`
