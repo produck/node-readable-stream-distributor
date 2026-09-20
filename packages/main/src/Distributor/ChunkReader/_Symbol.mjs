@@ -10,12 +10,14 @@ const $I_CONSUMED_CHUNK_COUNT = Symbol('.$consumedChunkCount');
 const $I_CHUNK_STASH = Symbol('.$chunkStash');
 const $I_READ = Symbol('.$read()');
 const $I_ENSURE_THEN_READ = Symbol('.$ensureThenRead()');
+const $I_CLOSE = Symbol('.$close()');
 
 export const $I = deepFreeze({
   CONSUMED_CHUNK_COUNT: $I_CONSUMED_CHUNK_COUNT,
   CHUNK_STASH: $I_CHUNK_STASH,
   READ: $I_READ,
   ENSURE_THEN_READ: $I_ENSURE_THEN_READ,
+  CLOSE: $I_CLOSE,
 });
 
 const _I_READ = Symbol('._read()');

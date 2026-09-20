@@ -143,6 +143,7 @@ class ReadableStreamDistributor extends EventTarget {
     const termination = this[$I.TERMINATION];
 
     for (const [forked, controller] of registry) {
+      forked[_A.FORKED.A.$I.READER][_A.READER.$I.CLOSE]();
       controller.error(termination);
       registry.prune(forked);
     }
@@ -163,9 +164,6 @@ class ReadableStreamDistributor extends EventTarget {
       transferrer[TRANSFERRER.$I.SET_DONE]();
       transferrer[TRANSFERRER.$I.DROP]();
     }
-
-    // TODO: decide the fate of the degraded reader's `$I.CLOSE` - the
-    //   destroy-only release policy took away its only prospective caller.
   }
 }
 

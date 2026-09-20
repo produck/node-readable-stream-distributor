@@ -75,7 +75,8 @@ Promise"这一事实：
 ```
 
 - 初始化由 `$I.REQUEST_INITIALIZE` **请求**（同一 tick 播种 + 发起链）：
-  先等 dumping 落地，再 open 介质，再进度同步；`close()` 看的就是这条链。
+  先等 dumping 落地，再 open 介质，再进度同步。（`close()` **不**等这条链
+  ——链体等 `dumping`，死盘上永不落地。）
 - 定位是**家族**的义务：`I.SEEKED_CHUNK_COUNT` 记游标已寻道跨过多少条记录，
   每次把读交给介质侧前 `I.SYNC()` 逐次 `_I.SEEK()` 跨边界补差（跨不动就
   停，差值留给下一次）；队列拦下的那段不碰介质侧，差值由此产生。介质侧只
@@ -91,8 +92,9 @@ Promise"这一事实：
   进度记错、后续再切换出错。分发器是唯一调用者；初始化无 once-guard
   （2026-09-09 迁往降级家族，`I.INITIALIZATION_STARTED` 已删）。
 - **文件句柄生命周期**：所有拷贝共享同一 `init`（同一 fileHandle）。
-  `close()` 归最后一个离开的拷贝（done / cancel 皆算），
-  归属要在协议里定清，避免提前关闭或泄漏。
+  介质句柄归**写侧**（transferrer）——`$I.DROP()` 一次放开，不在读器手里；
+  读器的 `close()` 只放开它自己的资源（不碰共享介质），由 `destroy()`
+  在收摊时调一次，幂等。
 
 ### dump 与活块的落点模型（2026-09-16 改写，取代原"停靠模型"）
 
@@ -298,14 +300,15 @@ Promise"这一事实：
   由子类自建（TemporaryFileChunkReader 的临时目录走配置 + 默认实现）。
   降级读取器继承 `AbstractDegradedChunkReader`（纯读，实现继承的
   `_I.*`）；写侧配套一个继承 `AbstractTransferrer` 的子类（`_I.DUMP` /
-  `_I.WRITE`），写侧类经 reader 静态 `_S.TRANSFERRER_CTOR` 声明。
+  `_I.WRITE` / `_I.DROP`），写侧类经 reader 静态 `_S.TRANSFERRER_CTOR` 声明。
 - **寻道定位在介质侧**（2026-09-09）：`$I.REQUEST_INITIALIZE(progress)`
   播种 `$I.CONSUMED_CHUNK_COUNT = progress`（规定位置）；降级介质侧实现的 `_I.INITIALIZE`
   （惰性：首次读介质前）按 `$I.CONSUMED_CHUNK_COUNT` 自实现定位——经家族
   抽象 `_I.SEEK`（只读 4B 头并前进游标、不读 body）逐界寻道，或按
   存储做 O(1) 跳转。基类不含 `_I.SEEK` / `$I.SKIP`（定位非通用驱动器）。
 - `_I.READ` 按 position 游标前进（读 body）。
-- 文件句柄关闭归属：最后一个拷贝离开时 close
+- 文件句柄关闭归属：已定（2026-09-19/20）——介质归写侧
+  `$I.DROP()`，读器自己的资源归 `$I.CLOSE`（`destroy()` 回收时调）
 
 ### 5. 错误路径
 

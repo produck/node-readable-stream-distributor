@@ -20,12 +20,10 @@ export const I = deepFreeze({
 
 const $I_TRANSFERRER = Symbol('.$transferrer');
 const $I_REQUEST_INITIALIZE = Symbol('.$requestInitialize()');
-const $I_CLOSE = Symbol('.$close()');
 
 export const $I = deepFreeze({
   TRANSFERRER: $I_TRANSFERRER,
   REQUEST_INITIALIZE: $I_REQUEST_INITIALIZE,
-  CLOSE: $I_CLOSE,
 });
 
 const _I_READ = Symbol('._read()');

@@ -150,9 +150,9 @@
 - **`destroy()` 骨架**：`destroy()` 是**幂等包装**（`$I.DESTROYED` 缓存
   同一个 Promise，`await` 几次也只跑一遍），实体在受保护的
   `async $I.DESTROY()`，分两段：
-  - **同步段**（调用当场、不可逆、可辨识）：`terminate()` → 遍历注册表
-    **当场结束每个拷贝**（`controller.error(终止原因)` + `prune`，不补
-    已缓冲的前缀）。
+  - **同步段**（调用当场、不可逆、可辨识）：`terminate()` → 遍历注册表，
+    **每个拷贝先关读器**（`$I.CLOSE`，两相同一句话）**再**
+    `controller.error(终止原因)` + `prune`，不补已缓冲的前缀。
   - **异步段**（Promise 落地时才完成）：`await SOURCE_READER.cancel(终止
 原因)`（失败只派 `warn('source-cancel-failed')`，不打断收摊）→ 等在途
     那一笔落定 → **按此刻的相位收场**：两侧同形——`$I.SET_DONE()`（封口）
@@ -173,11 +173,11 @@
   `pull` 钩子），在途的那次 `$I.ENSURE_THEN_READ` 若落在 DROP 之后，
   只会得到一个被流吞掉的拒绝，读侧观感不变。
 - **已完成**：两相都随 `$I.DROP()` 放开（内存相的块 / 降级相的队列与
-  介质句柄，见 Transferrer 一节），术语与 `ChunkStash.$I.DROP()` 对齐。
-- **未做**：读侧那套统一 close 动词——降级族 `$I.CLOSE` 已写好，但
-  destroy-only 的释放策略让它失去了唯一的前途：它的调用者本应是
-  “没人要了就自动关”的计数路线，而那条路线被否了。它的去向是个待决项
-  （接或删），已记在 `$I.DESTROY()` 的 TODO 里。
+  介质句柄，见 Transferrer 一节），术语与 `ChunkStash.$I.DROP()` 对齐；
+  读器随 `$I.CLOSE()` 关闭（回收时调用＋幂等，资源语义归宿主）。
+- **读侧关闭的边界**：框架只保证「幂等」与「回收时调一次」；钩子
+  `_I.CLOSE` 里**不得关介质**——介质是各读器共享的，归 `_I.DROP()`
+  与 transferrer。算作读器自己的资源（比如独立日志通道）才在它的职责里。
 
 ### SourceConsumptionAgent（消费代理）
 
@@ -280,7 +280,7 @@
 #### AbstractDegradedChunkReader（降级 · 生命周期持有者）
 
 - `I`：`INITIALIZED` / `CLOSED` / `SEEKED_CHUNK_COUNT` / `ERROR` /
-  `INITIALIZE` / `SYNC` / `READ_BACK`；`$I`：`TRANSFERRER` / `REQUEST_INITIALIZE` / `CLOSE`；
+  `INITIALIZE` / `SYNC` / `READ_BACK`；`$I`：`TRANSFERRER` / `REQUEST_INITIALIZE`；
   `_I`：`READ` / `INITIALIZE` / `CLOSE` / `SEEK`；`_S`：`TRANSFERRER_CTOR`
   （策略给出的写侧**类**）。
 - **下游便利面**：`get chunkStash`（共享 stash，`_I.DUMP(chunkStash)` 的
@@ -302,9 +302,12 @@
   曾用构造器传 `progress`、曾名 `START_INITIALIZE` + once-guard（均已废）。
 - **分发器是唯一调用者**（同一 tick：构造 → 播种 → 交接）；无守卫——
   链体的每个 `await` 都在播种之后，读路径拿到的一定是就位点。
-- `$I.CLOSE`：`I.CLOSED` 幂等 → await `I.INITIALIZED`（未发起链就是
-  `undefined`）→ `_I.CLOSE`；`get closed` 暴露状态。内存读器不在本契约
-  内（无 close）。
+- `$I.CLOSE`（**键归基类**，降级族覆盖同一个键）：`I.CLOSED` 幂等 →
+  **发起式**调 `_I.CLOSE`（返回值只用来吞掉拒绝，**不** `await
+I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping` 在
+  死盘上永不落地，等它就会把收摊一起挂住；`get closed` 暴露状态。
+  内存族的 close 是基类**空实现**（无资源），所以 `destroy()` 对两相
+  都能用同一句话关。
 
 ### 读路径
 

@@ -53,14 +53,13 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     this[A.I.SEEKED_COUNT] = count;
   }
 
-  async [$I.CLOSE]() {
+  [_A.READER.$I.CLOSE]() {
     if (this[I.CLOSED]) {
       return;
     }
 
     this[I.CLOSED] = true;
-    await this[I.INITIALIZED];
-    await this[_I.CLOSE]();
+    Promise.resolve(this[_I.CLOSE]()).catch(() => {});
   }
 
   async [_A.READER._I.READ]() {

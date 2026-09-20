@@ -25,6 +25,8 @@ class AbstractChunkReader {
 
     return this[$I.READ]();
   }
+
+  [$I.CLOSE]() {}
 }
 
 export default Abstract(
