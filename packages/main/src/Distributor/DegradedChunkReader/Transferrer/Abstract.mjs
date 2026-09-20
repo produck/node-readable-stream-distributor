@@ -36,7 +36,7 @@ class AbstractTransferrer {
     for (const [release, position] of waitingPositions) {
       if (position < total || isTerminal) {
         waitingPositions.delete(release);
-        release();
+        release(position < total);
       }
     }
   }
@@ -88,9 +88,6 @@ class AbstractTransferrer {
       this[I.SETTLE]();
     } catch (cause) {
       this[I.FAIL](cause);
-      // TODO: decide whether the taken-over list stays unreadable after a
-      //   failed dump, as it is now, or is still handed out while the medium
-      //   is dead.
       Ow.Error.Common('Failed to dump the ChunkStash.', { cause });
     }
   }
@@ -118,13 +115,14 @@ class AbstractTransferrer {
   async [$I.WAIT_POSITION](position) {
     this[I.ASSERT_NOT_DROPPED]();
 
-    const { promise, resolve } = Promise.withResolvers();
+    const { promise, resolve: release } = Promise.withResolvers();
 
-    this[I.WAITING_POSITION_TABLE].set(resolve, position);
+    this[I.WAITING_POSITION_TABLE].set(release, position);
     this[I.SETTLE]();
-    await promise;
 
-    if (this[I.ERROR] !== null) {
+    const accepted = await promise;
+
+    if (!accepted && this[I.ERROR] !== null) {
       Ow.throw(this[I.ERROR]);
     }
   }

@@ -6,6 +6,7 @@ const I_WRITTEN_CHUNK_COUNT = Symbol('.#writtenChunkCount');
 const I_PENDING_BYTE_LENGTH = Symbol('.#pendingByteLength');
 const I_WAITING_POSITION_TABLE = Symbol('.#waitingPositionTable');
 const I_DRAINING = Symbol('.#draining');
+const I_DRAIN = Symbol('.#drain()');
 const I_ERROR = Symbol('.#error');
 const I_DONE = Symbol('.#done');
 const I_DROPPED = Symbol('.#dropped');
@@ -21,6 +22,7 @@ export const I = deepFreeze({
   PENDING_BYTE_LENGTH: I_PENDING_BYTE_LENGTH,
   WAITING_POSITION_TABLE: I_WAITING_POSITION_TABLE,
   DRAINING: I_DRAINING,
+  DRAIN: I_DRAIN,
   ERROR: I_ERROR,
   DONE: I_DONE,
   DROPPED: I_DROPPED,
