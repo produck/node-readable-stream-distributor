@@ -1,5 +1,6 @@
 import { $I, A } from './_Symbol.mjs';
 import { _A, TRANSFERRER } from './_External.mjs';
+import * as Event from './Event.mjs';
 
 export default class SourceConsumptionAgent {
   pulling = null;
@@ -21,9 +22,6 @@ export default class SourceConsumptionAgent {
     const { distributor } = this;
     const sourceReader = distributor[A.I.SOURCE];
 
-    // TODO: observation — the backlog is never capped by design (a hung
-    //   medium is weathered while memory allows), so the host needs a way to
-    //   watch its size instead of the source being throttled on it.
     while (target >= this.pulledChunkCount && !sourceReader.finished) {
       if (this.pulling === null) {
         this.pulling = this.pull().finally(() => (this.pulling = null));
@@ -41,7 +39,7 @@ export default class SourceConsumptionAgent {
     const { value, done } = await this.distributor[A.I.SOURCE].read();
 
     if (this.distributor.degraded) {
-      await this.toTransferrer(value, done);
+      this.toTransferrer(value, done);
     } else {
       this.toStash(value, done);
       this.degradeIfNeeded();
@@ -77,7 +75,7 @@ export default class SourceConsumptionAgent {
     chunkStash[_A.STASH.$I.PUSH](chunk);
   }
 
-  async toTransferrer(chunk, done) {
+  toTransferrer(chunk, done) {
     const transferrer = this.distributor[$I.TRANSFERRER];
 
     if (done) {
@@ -86,6 +84,20 @@ export default class SourceConsumptionAgent {
       return;
     }
 
-    await transferrer[TRANSFERRER.$I.WRITE](chunk);
+    transferrer[TRANSFERRER.$I.WRITE](chunk);
+    this.observeBacklog();
+  }
+
+  observeBacklog() {
+    const { distributor } = this;
+    const transferrer = distributor[$I.TRANSFERRER];
+
+    if (transferrer.pendingByteLength > distributor[A.$I.LIMIT]) {
+      const event = new Event.Warn('backlog', {
+        byteLength: transferrer.pendingByteLength,
+      });
+
+      distributor.dispatchEvent(event);
+    }
   }
 }

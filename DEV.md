@@ -138,6 +138,10 @@
   构造写侧实例（按读器家族 `_S.TRANSFERRER_CTOR` + 预置构造参数）、
   执行其 `dump`、遍历 registry、选降级 reader 类、换掉各 fork 的读取器
   都留在结构侧。
+- **两个落点写入器都是同步的**（`toStash` / `toTransferrer`）：`$I.WRITE` 是框架
+  自己的同步成员（宿主要实现的是模板 `_I.WRITE`，它在 drain 里被 await），所以
+  写侧那一趟不需要 `async`——await 一个永远 `undefined` 的成员只多花一拍微任务，
+  还会让两个分支看起来不一样；同步抛错照样让 `pull()` 拒绝。
 - **相位边界的三个决定各有一个显式位置**：写入分支在 `pull()`（问
   `distributor.degraded`）、阈值判据在 `degradeIfNeeded()`、**交接与终态播种在
   `$I.DEGRADE`**。旧的写法把判据塞在 `toStash` 末尾，于是“达到上限又遇到
@@ -211,6 +215,21 @@
   失败时分叉（`DEGRADE` 抛错则 transferrer 从未落位，而旧字段已置真），
   后果是后续每趟 pull 都拿 `null[…]` 的 TypeError 顶掉真正的原因
   （实测见 `logs/probe-degrade-failure.mjs`）。
+- **积压告警**：`pull()` 走写侧那一趟在 `$I.WRITE` 之后问一次
+  `observeBacklog()`——`pendingByteLength > $I.LIMIT` 就派
+  `warn('backlog', { byteLength })`——**不去抖：只要还在阈值以上，每写一笔派
+  一次**（水准信号，限频归宿主；通常本来就被忽略，代价只是每次一点分配），
+  阈值重用构造参数 `limit`（零新增 API）。这条信号只存在
+  于降级相：内存相被降级触发天然封顶，而积压按设计不设上限、不闸门、
+  也不反压源（“顶住死盘”的代价由宿主从这条 `warn` 里看见）。
+- **它的采样点在写入路径上**（这条信号的边界条件，调阈值前先看这里）：
+  `observeBacklog()` 只在某一趟 pull 真的写下一笔时跑，于是——
+  ① 消费者暂停或源到头之后不再有 pull，**也就不再采样**：哪怕排水还在排、
+  积压仍很大；② 所以最后一条事件**不是峰值**，只是最后一次采样时的量；
+  ③ 条件消失是**静默**的（没有“恢复”事件），要判断“现在好了没”得宿主
+  自己记时间，或等它再次越界——这也是没做“回落事件”的原因，那会把
+  `warn` 变成宿主必须实现的状态机。想在任何时刻看到当前积压只有“拉”
+  （一个只读口）能做到：事件负责“值得看一眼的时刻”，读口负责“我随时想看”。
 - `ensure(target)` 契约：返回时目标位置已可读，或落点已封口；源报错则
   拒绝；内部发生的切换已落地。
   - 循环只认一个判据：`!sourceReader.finished`（源还能不能拉）。
@@ -452,11 +471,15 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
   `position < 水位 + 队列 || isTerminal`，一处 `delete` + `resolve`，
   让"放行点只有一处"一眼可见。`I.SETTLE` 首行空表早返回。
 - **纯内部对象**：实例由分发器私有持有，**不开观察面**——要看就进
-  调试器按符号表读成员（`I.PENDING_CHUNKS` / `I.WRITTEN_CHUNK_COUNT` /
-  `I.WAITING_POSITION_TABLE` / `I.DRAINING` / `I.DONE` / `I.ERROR` /
-  `I.DUMPING`）。对家族留两个读口：`get dumping`（初始化链等的就是它
-  落地）与 `get dropped`（宿主在 `_I.DUMP` / `_I.WRITE` 里提前收手看
-  它），其余交互全走 `$I` 原语。
+  调试器按符号表读成员（`I.PENDING_CHUNKS` / `I.PENDING_BYTE_LENGTH` /
+  `I.WRITTEN_CHUNK_COUNT` / `I.WAITING_POSITION_TABLE` / `I.DRAINING` /
+  `I.DONE` / `I.ERROR` / `I.DROPPED` / `I.DUMPING`）。读口是 getter：
+  `dumping` / `done` / `error` / `dropped` / `pendingByteLength`，其余交互
+  全走 `$I` 原语。
+- **积压计数 `I.PENDING_BYTE_LENGTH` / `get pendingByteLength`**：只数
+  **切换之后新堆上去、还没落盘**的字节（`$I.WRITE` 加、drain 每写一笔减、
+  `$I.DROP` 归零）；**交接过来那份不算**——它本来就在阈值附近，算进去等于
+  每次正常降级都误报一次。它是“写侧落后了多少”的度量，也是宿主的积压信号。
 - 实例与 `ChunkStash` 1:1，因此状态就是普通字段，不再用 WeakMap /
   WeakSet 按 stash 键控。抽象钩子 `_I.DUMP` / `_I.WRITE` 由下游实现。
 - 完成标志 `$I.SET_DONE()` / `get done` 与 stash 侧 `$I.SET_DONE()` /

@@ -650,10 +650,14 @@ sequenceDiagram
 - **未释放导致泄漏**：消费者既没 cancel 自己的拷贝流、也不释放引用时，
   文件描述符无法回收、磁盘文件无法删除
 
-模块通过事件机制提供感知能力：当拷贝存活时间或落后程度超过阈值
-时触发 `warn` 事件。默认策略为 `console.warn`，调用方可替换为
-自定义处理器（接入日志系统、监控报警等）。这是提示而非强
-制——若下游确实需要长时间后处理，忽略该事件即可。
+模块通过事件机制提供感知能力。**已实现的是积压**：降级相里“切换之后新堆
+上去、还没落盘的字节数”超过阈值（复用构造时的 `limit`）就派一次
+`warn('backlog', { byteLength })`——**不去抖**：只要还在阈值以上，每写一笔
+就派一次（水准信号，限频归宿主），阈值重用构造时的 `limit`
+（积压只观察、不闸门，也不反压源）。**未实现的是拷贝存活时间**（另一条
+信号，属拷贝侧）。框架**不装默认处理器**——不在库里替宿主决定怎么记事：
+宿主用 `addEventListener('warn', ...)` 自己接（日志、监控、告警）；这是
+提示而非强制，忽略该事件即可。
 
 ### 纯内存模式
 
@@ -661,20 +665,26 @@ sequenceDiagram
 
 ## 可观测性
 
-分发器不维护统一的状态快照，也不暴露 `stats` 之类的聚合对象：可观察
-信号按数据归属分散在组件与受保护成员上。
+分发器不维护统一的状态快照，也不暴露 `stats` 之类的聚合对象。信号分两类：
 
-- 内存缓冲当前字节 / 块数：`CHUNK_STASH`（ChunkStash）的
-  `byteLength` / `length`，由缓冲容器自管。
+**宿主可见**（只走类与事件，包出口不开符号表）：
+
 - 是否进入降级：`distributor.degraded`（观察 `$I.TRANSFERRER` 是否已
   落位——相位只有一个事实来源）。
-- 源侧终局：`SOURCE_READER`（SourceReader）的 `done` / `error` /
+- 是否已终结可用性：`distributor.terminated`。
+- 积压：`warn('backlog', { byteLength })`（降级相，超阈值的每一笔都派）。
+- fork 上线、终结、可恢复异常：`fork` / `terminate` / `warn` 事件。
+
+**仓库内 / 调试**（经受保护符号，宿主拿不到）：
+
+- 内存缓冲当前字节 / 块数：`I.CHUNK_STASH`（ChunkStash）的
+  `byteLength` / `length`，由缓冲容器自管。
+- 源侧终局：`I.SOURCE_READER`（SourceReader）的 `done` / `error` /
   `cancelled`——源到头 / 源出错 / 我们收摊，三个终局互斥穷尽。
-- 是否已终结可用性：`distributor.terminated`；终止原因看受保护的
-  `$I.TERMINATION`（未终结为 `null`，否则是那个 `AbortError`，
+- 终止原因：`$I.TERMINATION`（未终结为 `null`，否则是那个 `AbortError`，
   拷贝流的 `error` 就是它）。
-- 当前活跃 fork 集合：`$I.FORKED_READABLE_STREAM_REGISTRY`
-  （注册表内部 `size`）。
+- 当前活跃 fork 集合：`$I.FORKED_READABLE_STREAM_REGISTRY`（内部 `size`）。
+- 写侧水位：`pendingByteLength` / `dumping` / `done` / `dropped`。
 - 落盘 / 存储侧水位：降级 reader 与存储策略自管，分发器不感知。
 
 ### 生命周期事件
@@ -685,10 +695,12 @@ sequenceDiagram
 | ----------- | ---------------------- |
 | `fork`      | 新 fork 上线           |
 | `terminate` | 分发器可用性终结被调用 |
+| `warn`      | 可恢复异常与观测信号   |
 
-源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。
-`destroy()`（强档）不另派事件：它是宿主动作，调用方本来就知道——
-收摊何时完成看它返回的那个 Promise。
+源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。`warn` 的
+code 现在有三个：`dump-failed` / `source-cancel-failed` / `backlog`（载荷随
+code；框架不装默认处理器，宿主自己接）。`destroy()`（强档）不另派事件：它是
+宿主动作，调用方本来就知道——收摊何时完成看它返回的那个 Promise。
 
 ## 非目标
 

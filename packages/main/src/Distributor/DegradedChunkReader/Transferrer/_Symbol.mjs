@@ -3,6 +3,7 @@ import { deepFreeze } from '@produck/deep-freeze-enumerable';
 const I_DUMPING = Symbol('.#dumping');
 const I_PENDING_CHUNKS = Symbol('.#pendingChunks');
 const I_WRITTEN_CHUNK_COUNT = Symbol('.#writtenChunkCount');
+const I_PENDING_BYTE_LENGTH = Symbol('.#pendingByteLength');
 const I_WAITING_POSITION_TABLE = Symbol('.#waitingPositionTable');
 const I_DRAINING = Symbol('.#draining');
 const I_ERROR = Symbol('.#error');
@@ -17,6 +18,7 @@ export const I = deepFreeze({
   DUMPING: I_DUMPING,
   PENDING_CHUNKS: I_PENDING_CHUNKS,
   WRITTEN_CHUNK_COUNT: I_WRITTEN_CHUNK_COUNT,
+  PENDING_BYTE_LENGTH: I_PENDING_BYTE_LENGTH,
   WAITING_POSITION_TABLE: I_WAITING_POSITION_TABLE,
   DRAINING: I_DRAINING,
   ERROR: I_ERROR,

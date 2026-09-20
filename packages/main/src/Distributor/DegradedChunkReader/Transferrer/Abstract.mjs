@@ -9,6 +9,7 @@ const noop = () => {};
 class AbstractTransferrer {
   [A.I.WRITTEN_COUNT] = 0;
   [I.PENDING_CHUNKS] = [];
+  [I.PENDING_BYTE_LENGTH] = 0;
   [I.WAITING_POSITION_TABLE] = new Map();
   [I.DRAINING] = null;
   [I.DUMPING] = null;
@@ -67,6 +68,7 @@ class AbstractTransferrer {
       }
 
       this[I.PENDING_CHUNKS].shift();
+      this[I.PENDING_BYTE_LENGTH] -= buffer.byteLength;
       this[A.I.WRITTEN_COUNT] += 1;
     }
 
@@ -105,6 +107,7 @@ class AbstractTransferrer {
     }
 
     this[I.PENDING_CHUNKS].push(chunk);
+    this[I.PENDING_BYTE_LENGTH] += chunk.byteLength;
     this[I.SETTLE]();
 
     if (this[I.DRAINING] === null) {
@@ -141,6 +144,7 @@ class AbstractTransferrer {
     this[I.ASSERT_NOT_DROPPED]();
     this[I.DROPPED] = true;
     this[I.PENDING_CHUNKS] = [];
+    this[I.PENDING_BYTE_LENGTH] = 0;
 
     Promise.resolve(this[_I.DROP]()).catch(noop);
   }
@@ -159,6 +163,10 @@ class AbstractTransferrer {
 
   get dropped() {
     return this[I.DROPPED];
+  }
+
+  get pendingByteLength() {
+    return this[I.PENDING_BYTE_LENGTH];
   }
 }
 
