@@ -191,10 +191,10 @@ Promise"这一事实：
 - **`AbstractTransferrer`（写侧内部抽象，2026-09-07 定稿）**：
   - 受保护实例 `$I.DUMP(chunkStash)`：与 stash 绑定的时刻，**同步返回**；
     微任务里调抽象 `_I.DUMP`，成功则由**本实例** `DROP` 载体并把水位推
-    满（不再由分发器封存）；失败闩 `I.ERROR`、结算门、保留现场（接管的
+    满；失败闩 `I.ERROR`、结算门、保留现场（接管的
     这批仍在队列里照发），返回的 Promise 以转义错误拒给分发器挂 `warn`。
   - 抽象实例 `_I.DUMP`（下游实现）：**靠参数拿到 `chunkStash`**，
-    负责转存 ChunkStash 到降级目标（不含封存），返回 PromiseOr。
+    负责转存 ChunkStash 到降级目标，返回 PromiseOr。
   - 受保护实例 `$I.WRITE(buffer)`：**入队即返回**（不碰介质）；抽象
     `_I.WRITE(buffer)` 由单飞 drain 按 FIFO 调用。
   - 受保护实例 `$I.SET_DONE()`：源已尽在降级相位的一次落点。

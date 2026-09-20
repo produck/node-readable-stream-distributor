@@ -131,8 +131,8 @@
   换读器时置为前者）。受保护侧另有写侧实例与其待用构造参数：`$I.TRANSFERRER` /
   `$I.SET_TRANSFERRER_ARGS(...)`（落 `I.TRANSFERRER_ARGS`，分发器只存转、
   不解释）。构造校验 source 为未锁定的 WHATWG ReadableStream。
-- 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（push /
-  `$I.SEAL()` / `$I.SET_DONE()`）归 `SourceConsumptionAgent`；dump→drop
+- 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（`$I.PUSH()` /
+  `$I.SET_DONE()`）归 `SourceConsumptionAgent`；dump→drop
   归写侧（`START_DUMPING` 成功自己 DROP），内存相的 drop 归 `destroy()`。
 - 降级：**触发在消费代理**（stash 字节超过构造时定下的阈值），**执行在分发器** `$I.DEGRADE`——
   构造写侧实例（按读器家族 `_S.TRANSFERRER_CTOR` + 预置构造参数）、
@@ -205,8 +205,8 @@
 
 - 角色：**唯一的源消费方**（`pulling` 单飞，所有等待者共享同一趟拉取）
   与**唯一的落点写入者**——“源的事实”经它交给落点。降级的**触发**也在
-  这里，单独一个成员 `degradeIfNeeded()`（stash 字节超阈值 → `$I.SEAL()`
-  → `distributor.$I.DEGRADE()`；执行仍在结构侧，见 Distributor 一节）
+  这里，单独一个成员 `degradeIfNeeded()`（stash 字节超阈值 →
+  `distributor.$I.DEGRADE()`；执行仍在结构侧，见 Distributor 一节）
   ——落点写入（`toStash` / `toTransferrer`）与切换策略分开写，阈值这种
   分发器策略一眼看得见。
 - **相位只有一个事实来源**：`distributor.degraded` 观察自己的
@@ -274,14 +274,19 @@
 
 ### ChunkStash（共享内存暂存）
 
-- 公开只读：`dropped` / `sealed` / `done` / `length` / `byteLength`；
-  `get(index)` 带封存守卫；`chunks()` 返回有序快照迭代器。
-- 写面受保护：`$I.PUSH(chunk)` / `$I.SEAL()` / `$I.SET_DONE()` / `$I.DROP()`
-  只在包内使用——公开它们会泄漏"封存共享内存"的能力（Transferrer
-  只管转存，不封存）。
-- 两个终态各管一件事：`sealed` = 整份 dump 前的写面冻结（**与源已尽
-  无关**）；`done` = 这一层存储自己的内容终态（由落点交接而来）。二者是
-  私有 `I` 成员，只经上面四个动作与 `get sealed` / `get done` 进出。
+- 公开只读：`dropped` / `done` / `length` / `byteLength`；`get(index)` 与
+  `chunks()` 带**放开**守卫（`ASSERT_NOT_DROPPED`）。
+- 写面受保护：`$I.PUSH(chunk)` / `$I.SET_DONE()` / `$I.DROP()` 只在包内使用。
+  交接之后源侧不会再往 stash 写：相位翻转（写侧落位）本身就是那条保证。
+- `done` = 这一层存储自己的内容终态（由落点交接而来）；`dropped` = 放开载体。
+  二者是私有 `I` 成员，只经上面三个动作与 `get done` 进出。
+- **`sealed` 已删（2026-09-20）**：它原本把"触达前沿"与"真 `done`"分开
+  （`index >= length` 且已封口才算完），09-13 起那份判据归 `ensure()` 的
+  就绪契约与位置门；剩下的"整份 dump 前的写面冻结"由**相位翻转**与
+  **dump 成功即 `DROP`** 保证，与这个位无关——实测
+  （`logs/probe-write-face.mjs`）：成功路径载体已被放开（推进去抛
+  `dropped`），失败路径"封口位为真"也照样推得进去。位既非判据也非闸，
+  删掉不变量不变。
 
 ### Reader 术语
 
@@ -423,7 +428,7 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
   `AbstractTransferrer`。**无阻塞调度的复杂性全在此作用域**：外部只
   挥手与转发，不再判断"何时降级 / dump 何时落地"。
 - 四个驱动（受保护，只给分发器与 agent）：
-  - `$I.DUMP(chunkStash)` — 交出整份 stash（不含封存）。**同步返回**：它
+  - `$I.DUMP(chunkStash)` — 交出整份 stash。**同步返回**：它
     **接管** stash 的整份块列表（同一批对象，只加引用，不复制）——此刻
     队列必空，因为 `$I.DUMP` 是队列的第一个写入者（transferrer 刚在
     `$I.DEGRADE` 里构造出来就挥手），这条是接管式写法的前提。把那一趟
@@ -601,6 +606,9 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
 - 09-13 修订：封口改归"整份 dump 前的冻结"，真 `done` 改由 `stash.done`
   与自身位置判定，前沿改由 `ensure()` 的就绪契约吸收；下列"待收敛"两项
   由此收口。
+- 09-20 删除：`sealed` 整套移除（`I.SEALED` / `$I.SEAL` / `get sealed` /
+  调用点）——两半职责早已各有归属（真 `done` 归 `stash.done` + 位置，写面
+  冻结归相位翻转 + dump 成功即 `DROP`），这个位既非判据也非闸。
 - 待收敛（当时）：前沿信号形态、`$I.READ` 的等待方式，以及它与共享
   取块层"确保可用"的衔接。
 

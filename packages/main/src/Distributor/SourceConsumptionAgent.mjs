@@ -57,7 +57,6 @@ export default class SourceConsumptionAgent {
     const chunkStash = distributor[A.I.STASH];
 
     if (chunkStash.byteLength > distributor[A.$I.LIMIT]) {
-      chunkStash[_A.STASH.$I.SEAL]();
       distributor[$I.DEGRADE]();
     }
   }

@@ -117,7 +117,7 @@ graph TD
 | `BufferChunkReader`            | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
 | `AbstractDegradedChunkReader`  | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                     |
 | `AbstractTransferrer`          | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE` / `$I.DROP`，读侧位置门与队列计数                                        |
-| `ChunkStash`                   | 共享内存缓冲容器——聚合 chunk，写/封存为受保护生命周期（push/seal/setDone/drop），读侧公开                                                              |
+| `ChunkStash`                   | 共享内存缓冲容器——聚合 chunk，写面为受保护生命周期（push/setDone/drop），读侧公开                                                                      |
 | `ForkedReadableStream`         | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                 |
 | `SourceReader`                 | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态），不含调度                                                                        |
 | `SourceConsumptionAgent`       | 源流消费代理（内部类）——统筹调度（拉不拉、并发合并 single-flight、背压）与落点；按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享 |
@@ -149,7 +149,6 @@ classDiagram
         +length
         +byteLength
         +dropped
-        +sealed
         +done
         +get(index)
         +chunks()
@@ -422,7 +421,7 @@ graph BT
     块列表（同一批对象，只加引用），活块续在队尾——一条 FIFO
     （`I.DRAIN` 单飞）就是全部；外部（分发器与读器）既不 `await` dump，
     也不判断换读器时机。
-  - `$I.DUMP(chunkStash)` — 交出整个 `ChunkStash`（不含封存），**同步
+  - `$I.DUMP(chunkStash)` — 交出整个 `ChunkStash`，**同步
     返回**：先接管 stash 的整份块列表（此刻队列必空），再把那一趟记进
     `I.DUMPING` 并返回，本体在 `I.START_DUMPING` 里——同一步里就调抽象
     `_I.DUMP` 开工，成功即 `DROP` 载体、清掉接管的这 L 条（已落盘）并把
