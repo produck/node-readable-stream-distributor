@@ -131,7 +131,8 @@ Promise"这一事实：
 >
 > 2026-09-15 修订：Transferrer 由策略级单例改为**分发器持有、降级时
 > 构造**的实例——类由降级读器家族静态给出（`_S.TRANSFERRER_CTOR`），
-> 构造参数经 `$I.SET_TRANSFERRER_ARGS(...)` 预置（分发器只存转、不解释），
+> 构造参数经 `$I.SET_TRANSFERRER_ARGS(...)` 预置（写侧家族的
+> `_S.PARSE_ARGUMENTS` 归一、基类默认恒等，分发器不解释），
 > 实例与 `ChunkStash` 1:1；原一次性静态成员 `transferrer` 的配置方式取消。
 > 与 stash 的绑定仍发生在 `dump(chunkStash)`。
 >

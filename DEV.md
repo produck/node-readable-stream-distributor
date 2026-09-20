@@ -129,8 +129,9 @@
   getter `I.DEGRADED_CHUNK_READER_CTOR` / `I.TRANSFERRER_CTOR`，以及当前
   相位字段 `I.CURRENT_CHUNK_READER_CTOR`（初值 `BufferChunkReader`，降级
   换读器时置为前者）。受保护侧另有写侧实例与其待用构造参数：`$I.TRANSFERRER` /
-  `$I.SET_TRANSFERRER_ARGS(...)`（落 `I.TRANSFERRER_ARGS`，分发器只存转、
-  不解释）。构造校验 source 为未锁定的 WHATWG ReadableStream。
+  `$I.SET_TRANSFERRER_ARGS(...)`（落 `I.TRANSFERRER_ARGS`，经写侧家族的
+  `_S.PARSE_ARGUMENTS` 归一——基类给了恒等默认，分发器自己不解释）。构造
+  校验 source 为未锁定的 WHATWG ReadableStream。
 - 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（`$I.PUSH()` /
   `$I.SET_DONE()`）归 `SourceConsumptionAgent`；dump→drop
   归写侧（`START_DUMPING` 成功自己 DROP），内存相的 drop 归 `destroy()`。
@@ -513,7 +514,9 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
   `$I.DROP` 归零）；**交接过来那份不算**——它本来就在阈值附近，算进去等于
   每次正常降级都误报一次。它是“写侧落后了多少”的度量，也是宿主的积压信号。
 - 实例与 `ChunkStash` 1:1，因此状态就是普通字段，不再用 WeakMap /
-  WeakSet 按 stash 键控。抽象钩子 `_I.DUMP` / `_I.WRITE` 由下游实现。
+  WeakSet 按 stash 键控。抽象钩子 `_I.DUMP` / `_I.WRITE` / `_I.DROP` 由下游
+  实现，静态侧 `_S.PARSE_ARGUMENTS` 基类已给恒等实现（覆盖可选；入参是整份
+  参数数组而非摊平，receiver 是写侧类，预置构造参数时经它归一）。
 - 完成标志 `$I.SET_DONE()` / `get done` 与 stash 侧 `$I.SET_DONE()` /
   `done` 同形（连分层也一致），但落点换人：降级相位的落点交接记在
   transferrer 上（源已尽那一趟拉取由 agent 同步置位）。它不只置位——

@@ -1,12 +1,16 @@
 import * as Ow from '@produck/ow';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
-import { I, $I, _I, A } from './_Symbol.mjs';
+import { I, $I, _I, _S, A } from './_Symbol.mjs';
 import { _A } from './_External.mjs';
 
 const noop = () => {};
 
 class AbstractTransferrer {
+  static [_S.PARSE_ARGUMENTS](args) {
+    return args;
+  }
+
   [A.I.WRITTEN_COUNT] = 0;
   [I.PENDING_CHUNKS] = [];
   [I.PENDING_BYTE_LENGTH] = 0;
@@ -174,5 +178,10 @@ export default Abstract(
     [_I.DUMP]: M.Method(),
     [_I.WRITE]: M.Method(),
     [_I.DROP]: M.Method(),
+  }),
+  Abstract.Static({
+    [_S.PARSE_ARGUMENTS]: M.Method()
+      .args(M.Instance(Array))
+      .returns(M.Instance(Array)),
   }),
 );

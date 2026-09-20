@@ -75,12 +75,14 @@ class ReadableStreamDistributor extends EventTarget {
   }
 
   [$I.SET_TRANSFERRER_ARGS](...args) {
-    if (this[$I.TRANSFERRER] !== null) {
+    if (this.degraded) {
       Ow.Error.Common('Transferrer args have been consumed');
     }
 
-    //TODO check args
-    this[I.TRANSFERRER_ARGS] = args;
+    const { [A.I.CTOR.TRANSFERRER]: TransferrerImpl } = this;
+    const parsed = TransferrerImpl[TRANSFERRER._S.PARSE_ARGUMENTS](args);
+
+    this[I.TRANSFERRER_ARGS] = parsed;
   }
 
   get [A.I.CTOR.READER.DEGRADED]() {

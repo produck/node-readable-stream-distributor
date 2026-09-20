@@ -58,6 +58,12 @@ export const _I = deepFreeze({
   DROP: _I_DROP,
 });
 
+const _S_PARSE_ARGUMENTS = Symbol('._parseArguments()');
+
+export const _S = deepFreeze({
+  PARSE_ARGUMENTS: _S_PARSE_ARGUMENTS,
+});
+
 export const A = deepFreeze({
   I: {
     WRITTEN_COUNT: I_WRITTEN_CHUNK_COUNT,
