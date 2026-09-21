@@ -1,6 +1,7 @@
 import { $I, A } from './_Symbol.mjs';
 import { _A, TRANSFERRER } from './_External.mjs';
 import * as Event from './Event.mjs';
+import * as Options from './Options/index.mjs';
 
 export default class SourceConsumptionAgent {
   pulling = null;
@@ -55,10 +56,19 @@ export default class SourceConsumptionAgent {
   degradeIfNeeded() {
     const { distributor } = this;
     const chunkStash = distributor[A.I.STASH];
+    const limit = Options.Get.MaxStashByteLength(distributor);
 
-    if (chunkStash.byteLength > distributor[A.$I.LIMIT]) {
-      distributor[$I.DEGRADE]();
+    if (chunkStash.byteLength <= limit) {
+      return;
     }
+
+    const degradeOnDone = Options.Get.DegradeOnStashFullAndDone(distributor);
+
+    if (chunkStash.done && !degradeOnDone) {
+      return;
+    }
+
+    distributor[$I.DEGRADE]();
   }
 
   toStash(chunk, done) {
@@ -90,8 +100,9 @@ export default class SourceConsumptionAgent {
   observeBacklog() {
     const { distributor } = this;
     const transferrer = distributor[$I.TRANSFERRER];
+    const warningLength = Options.Get.MaxBacklogWarningByteLength(distributor);
 
-    if (transferrer.pendingByteLength > distributor[A.$I.LIMIT]) {
+    if (transferrer.pendingByteLength > warningLength) {
       const event = new Event.Warn('backlog', {
         byteLength: transferrer.pendingByteLength,
       });

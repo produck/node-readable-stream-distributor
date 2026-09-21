@@ -11,7 +11,7 @@ import SourceConsumptionAgent from './SourceConsumptionAgent.mjs';
 import ForkedReadableStreamRegistry from './ForkedReadableStreamRegistry.mjs';
 import * as Checker from './Checker.mjs';
 import * as Event from './Event.mjs';
-import * as Parser from './Parser.mjs';
+import * as Options from './Options/index.mjs';
 import { I, $I, _S, A } from './_Symbol.mjs';
 import { _A, TRANSFERRER } from './_External.mjs';
 
@@ -21,23 +21,27 @@ class ReadableStreamDistributor extends EventTarget {
   [A.I.STASH] = new ChunkStash.Concrete();
   [A.$I.REGISTRY] = new ForkedReadableStreamRegistry();
   [$I.TERMINATION] = null;
-  [A.$I.LIMIT] = 0;
   [I.TRANSFERRER_ARGS] = [];
   [$I.TRANSFERRER] = null;
   [$I.DESTROYED] = null;
   [A.I.CTOR.READER.CURRENT] = BufferChunkReader.Concrete;
 
-  constructor(source, limit = 1024 ** 3) {
+  constructor(source) {
     super();
 
     if (!Checker.isReadableStreamLike(source)) {
       ThrowTypeError('source', 'a WHATWG ReadableStream');
     }
 
+    Options.install(this);
+
     this[I.CTOR] = new.target;
-    this[A.$I.LIMIT] = Parser.NonNegativeInteger(limit);
     this[A.I.SOURCE] = new SourceReader.Concrete(source);
     this[A.I.AGENT] = new SourceConsumptionAgent(this);
+  }
+
+  get options() {
+    return Options.getOptionsSnapshot(this);
   }
 
   get degraded() {
@@ -103,10 +107,6 @@ class ReadableStreamDistributor extends EventTarget {
     const stash = this[A.I.STASH];
     const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
 
-    // TODO: the edge policy - "past the limit and the source already ended"
-    //   switches today, as a consequence of the probe running on every pull;
-    //   make it a declaration the host can set (an _S entry or a protected
-    //   member) once a second value has a user.
     if (stash.done) {
       transferrer[TRANSFERRER.$I.SET_DONE]();
     }

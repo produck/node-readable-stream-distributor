@@ -63,7 +63,7 @@
   `A.$I.CONSUMED_COUNT`）。没开键的长名可以随手开一个，判据是**键名长短 ×
   消费点数量**（短名开别名反而更长，见下条）。
 - **现存键集**（`A`）：`Distributor`——`I.{STASH,AGENT,SOURCE}`、
-  `I.CTOR.{TRANSFERRER,READER.{DEGRADED,CURRENT}}`、`$I.{LIMIT,REGISTRY}`；
+  `I.CTOR.{TRANSFERRER,READER.{DEGRADED,CURRENT}}`、`$I.REGISTRY`；
   `ChunkReader`——`I.AGENT`、`$I.{CONSUMED_COUNT,STASH}`；
   `DegradedChunkReader`——`I.SEEKED_COUNT`；`Transferrer`——`I.WRITTEN_COUNT`；
   `ForkedReadableStream`——`I.READER`、`$I.READER`。
@@ -87,10 +87,9 @@
 - 分发器没有公开静态面：策略只经 `_S` 静态钩子声明类值（现只剩
   `_S.DEGRADED_CHUNK_READER_CTOR`），消费者是构造时捕获的 `I.CTOR`
   （`new.target`），不用 `this.constructor`。
-- 内存→介质阈值：构造参数 `stashByteLimit`（默认 `1024 ** 3`，即 1GiB），
-  构造时经 `NonNegativeInteger` 校验后落进受保护字段
-  `$I.STASH_BYTE_LIMIT`；唯一写入点就是构造器，此后只读。降级触发点
-  因此确定可复现。
+- 内存→介质阈值：**选项** `MaxStashByteLength`（默认 1GiB 由 `Items.mjs` 给）。
+  读经 `Options.Get.MaxStashByteLength`、写经 `Options.Tune`——构造器只收
+  `source`，没有第二个写入点；降级触发点因此确定可复现。
 - `_S.DEGRADED_CHUNK_READER_CTOR`：策略侧给出的降级读取器类引用，
   degrade 时用它构造各 fork 的新读取器；暂以 `M.Function` 弱校（只确认
   是函数），待收敛为“必须是降级家族的子类”。
@@ -119,8 +118,7 @@
   `terminate()`（只关闸门，幂等）；`destroy()`（关闸门 + 封口 + 切断源
   - 收摊；幂等，返回同一个 Promise）。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
-  `ChunkStash`）· `$I.STASH_BYTE_LIMIT`（阈值，构造器唯一写入）·
-  `I.SOURCE_CONSUMPTION_AGENT`（消费代理）·
+  `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）·
   `$I.FORKED_READABLE_STREAM_REGISTRY`
   （fork 注册表，fork 出口自清理也要读）· `$I.TERMINATION`（未终结为
   `null`，否则是终止原因；只剩 `fork()` 闸门与 `destroy()` 的取消读它）·
@@ -143,23 +141,25 @@
   自己的同步成员（宿主要实现的是模板 `_I.WRITE`，它在 drain 里被 await），所以
   写侧那一趟不需要 `async`——await 一个永远 `undefined` 的成员只多花一拍微任务，
   还会让两个分支看起来不一样；同步抛错照样让 `pull()` 拒绝。
-- **相位边界的三个决定各有一个显式位置**：写入分支在 `pull()`（问
-  `distributor.degraded`）、阈值判据在 `degradeIfNeeded()`、**交接与终态播种在
-  `$I.DEGRADE`**。旧的写法把判据塞在 `toStash` 末尾，于是“达到上限又遇到
-  `done` 时不切换”是**位置带来的副作用**，没人声明过；现在判据对 `done` 那一趟
-  也跑，那条边界就是显式的了：“达到上限且源已到头 → **照样切换**”（限额不
-  因为源到头就失效），代价是切换得自己交代状态——**终态随交接走**：stash 已
-  `done` 就先给新 transferrer `$I.SET_DONE()`，否则读器会在前沿等一个永不来的
-  下一笔（实测 `logs/probe-degrade-after-done.mjs`）。失败也不锁死：判据每趟都
-  跑，宿主修好之后下一趟重新尝试。
-- **可后加的第四个决定（未做，2026-09-20 留档；代码里有对应 TODO）**：
-  “达到上限且源已到头”时
-  **切还是不切**，可以做成一个开关（判据里读 `stash.done` + 一个策略位，
-  `_S` 静态或受保护方法都行）。现在这条边界只有一个合法值（照切），没有
-  使用者就先不开口；判据已经收在 `degradeIfNeeded()` 一处，加开关就是那里
-  多一个 `if`——而且“不切”那一支**不需要交代任何状态**（stash 仍是落点、
-  自己的 `done` 也在自己身上），所以开关本身没有隐藏义务。届时 DESIGN 那句
-  “限额不因为源到头就失效”要跟着改成“默认如此、可关”。
+- **相位边界的决定各有一个显式位置**：写入分支在 `pull()`（问
+  `distributor.degraded`）、阈值判据与边界策略在 `degradeIfNeeded()`、**交接与
+  终态播种在 `$I.DEGRADE`**。旧的写法把判据塞在 `toStash` 末尾，于是“达到上限
+  又遇到 `done` 时不切换”是**位置带来的副作用**，没人声明过；现在判据对 `done`
+  那一趟也跑。
+- **边界策略是一个选项**（`DegradeOnStashFullAndDone`，2026-09-21 落）：
+  “达到上限且源已到头”时切不切由它决定，判据读法就是它的名字——两个事实都在
+  `degradeIfNeeded()` 里显式：越限（`byteLength > MaxStashByteLength`）+ 到头
+  （`stash.done`）。**默认 `false` = 不切**：源已到头，数据全集已在这份 stash
+  里且不会再涨，落介质只是白搬一趟；“不切”那一支**不需要交代任何状态**
+  （stash 仍是落点、自己的 `done` 也在自己身上），读侧照旧按
+  `stash.done && index >= length` 收尾。取 `true` 时是旧行为：照样切换，并且
+  **终态随交接走**——stash 已 `done` 就先给新 transferrer `$I.SET_DONE()`，否则
+  读器会在前沿等一个永不来的下一笔。两值实测
+  `logs/probe-degrade-after-done.mjs`：**读侧结果一致**（`s0 → s1 → close`），
+  差别只在落点是内存还是介质（默认相位字节 4、未被 DROP；`true` 时介质 2 块）。
+- **降级失败与这条策略的交互**：判据每趟都跑 ⇒ 失败不锁死；但若是**到头那一趟
+  才修好**而策略为 `false`，重试会被策略挡下，此后源已尽、不再有 pull ⇒
+  最终不切换、全量留内存（探针的两支正好覆盖这两个值）。
 - **`terminate()` 的契约**：幂等（已终结即返回）；终止原因落
   `$I.TERMINATION`（`DOMException`，`name` 为 `AbortError`）；派
   `terminate` 事件。**它只关闸门**：此后 `fork()` 抛错，除此外什么都不动——
@@ -217,10 +217,11 @@
   后果是后续每趟 pull 都拿 `null[…]` 的 TypeError 顶掉真正的原因
   （实测见 `logs/probe-degrade-failure.mjs`）。
 - **积压告警**：`pull()` 走写侧那一趟在 `$I.WRITE` 之后问一次
-  `observeBacklog()`——`pendingByteLength > $I.LIMIT` 就派
+  `observeBacklog()`——`pendingByteLength > MaxBacklogWarningByteLength`
+  （选项，读经 `Options.Get`）就派
   `warn('backlog', { byteLength })`——**不去抖：只要还在阈值以上，每写一笔派
   一次**（水准信号，限频归宿主；通常本来就被忽略，代价只是每次一点分配），
-  阈值重用构造参数 `limit`（零新增 API）。这条信号只存在
+  该选项默认**跟随** `MaxStashByteLength`。这条信号只存在
   于降级相：内存相被降级触发天然封顶，而积压按设计不设上限、不闸门、
   也不反压源（“顶住死盘”的代价由宿主从这条 `warn` 里看见）。
 - **它的采样点在写入路径上**（这条信号的边界条件，调阈值前先看这里）：

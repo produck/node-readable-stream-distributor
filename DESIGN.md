@@ -29,8 +29,8 @@
 `ReadableStreamDistributor` 是**抽象类**——不能直接 `new`，下游须继承；
 默认实现可按需覆盖。
 
-- 内存→介质阈值：构造参数 `stashByteLimit`（默认 `1GiB`），构造时校验并
-  落进受保护字段 `$I.STASH_BYTE_LIMIT`，此后只读
+- 内存→介质阈值：选项 `MaxStashByteLength`（默认 `1GiB`），读经
+  `Options.Get`、写经 `Options.Tune`（构造器只收 `source`）
 - `get degraded` → 观察 `$I.TRANSFERRER`（相位只有一个事实来源）
 - `[_S.DEGRADED_CHUNK_READER_CTOR]` → 策略侧给出的降级读取器类，degrade
   时用它就地构造各 fork 的新读取器
@@ -49,8 +49,8 @@ import { ReadableStreamDistributor } from '@produck/readable-stream-distributor'
 class MyDistributor extends ReadableStreamDistributor {}
 const distributor = new MyDistributor(source);
 
-// 注意：阈值只在构造时传入（默认 `1GiB`）；一旦溢出到磁盘后
-// `$I.STASH_BYTE_LIMIT` 不再被查询（单向门）
+// 注意：阈值经 `Options.Tune.MaxStashByteLength` 设定（默认 `1GiB`），
+// 一旦溢出到磁盘后 `MaxStashByteLength` 不再被查询（单向门）
 
 const copy = distributor.fork('sha1-checker');
 // label：助记符，用于事件和统计中标识拷贝，不作唯一性约束
@@ -474,9 +474,11 @@ sequenceDiagram
     DIST->>B: 回放 chunks 3-10 → 无缝切换到 chunk 11..
 ```
 
-**边界策略写在 `$I.DEGRADE` 里**：阈值判据（`degradeIfNeeded()`）在 `pull()`
-里跑，**对 `done` 那一趟也跑**，所以“达到上限且源已到头”**照样切换**——
-限额不因为源到头就失效。切换的执行因此必须自己把状态交代清楚，第一条就是
+**边界策略是一个选项**（`DegradeOnStashFullAndDone`）：阈值判据
+（`degradeIfNeeded()`）在 `pull()` 里跑、**对 `done` 那一趟也跑**，
+“达到上限且源已到头”时切不切由该选项决定——**默认不切**（数据全集已在
+stash 里且不会再涨，落介质只是白搬一趟），取“切”时切换的执行必须自己把
+状态交代清楚，第一条就是
 **终态随交接走**：stash 已 `done` 就先给新落点 `$I.SET_DONE()`，否则读器会在
 前沿等一个永不来的下一笔（旧写法把判据塞在 `toStash` 末尾、只对 `PUSH` 跑，
 所以“不切换”只是碰巧，不是策略）。失败也不锁死：判据每趟都跑，宿主修好之后
@@ -658,10 +660,11 @@ sequenceDiagram
   文件描述符无法回收、磁盘文件无法删除
 
 模块通过事件机制提供感知能力。**已实现的是积压**：降级相里“切换之后新堆
-上去、还没落盘的字节数”超过阈值（复用构造时的 `limit`）就派一次
+上去、还没落盘的字节数”超过阈值（选项 `MaxBacklogWarningByteLength`，
+默认跟随 `MaxStashByteLength`）就派一次
 `warn('backlog', { byteLength })`——**不去抖**：只要还在阈值以上，每写一笔
-就派一次（水准信号，限频归宿主），阈值重用构造时的 `limit`
-（积压只观察、不闸门，也不反压源）。**未实现的是拷贝存活时间**（另一条
+就派一次（水准信号，限频归宿主）。积压只观察、不闸门，也不反压源。
+**未实现的是拷贝存活时间**（另一条
 信号，属拷贝侧）。框架**不装默认处理器**——不在库里替宿主决定怎么记事：
 宿主用 `addEventListener('warn', ...)` 自己接（日志、监控、告警）；这是
 提示而非强制，忽略该事件即可。

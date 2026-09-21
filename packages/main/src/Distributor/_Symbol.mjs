@@ -20,7 +20,6 @@ export const I = deepFreeze({
   TRANSFERRER_CTOR: I_TRANSFERRER_CTOR,
 });
 
-const $I_STASH_BYTE_LIMIT = Symbol('.$stashByteLimit');
 const $I_TERMINATION = Symbol('.$termination');
 const $I_TRANSFERRER = Symbol('.$transferrer');
 const $I_SET_TRANSFERRER_ARGS = Symbol('.$setTransferrerArgs()');
@@ -32,7 +31,6 @@ const $I_DESTROYED = Symbol('.$destroyed');
 const $I_DESTROY = Symbol('.$destroy()');
 
 export const $I = deepFreeze({
-  STASH_BYTE_LIMIT: $I_STASH_BYTE_LIMIT,
   FORKED_READABLE_STREAM_REGISTRY: $I_FORKED_READABLE_STREAM_REGISTRY,
   TERMINATION: $I_TERMINATION,
   TRANSFERRER: $I_TRANSFERRER,
@@ -62,7 +60,6 @@ export const A = deepFreeze({
     },
   },
   $I: {
-    LIMIT: $I_STASH_BYTE_LIMIT,
     REGISTRY: $I_FORKED_READABLE_STREAM_REGISTRY,
   },
 });
