@@ -1,3 +1,5 @@
+import * as Options from '../Options/index.mjs';
+
 import { I, $I, A } from './_Symbol.mjs';
 import { DISTRIBUTOR, _A } from './_External.mjs';
 
@@ -9,6 +11,7 @@ export default class ForkedReadableStream extends ReadableStream {
 
   constructor(distributor, bufferReader, label) {
     const registry = distributor[DISTRIBUTOR.A.$I.REGISTRY];
+    const highWaterMark = Options.Get.ForkHighWaterMark(distributor);
     let _controller;
 
     const start = (controller) => {
@@ -46,7 +49,7 @@ export default class ForkedReadableStream extends ReadableStream {
       registry.prune(this);
     };
 
-    super({ start, pull, cancel });
+    super({ start, pull, cancel }, { highWaterMark });
     this[I.LABEL] = label;
     this[A.I.READER] = bufferReader;
     registry.add(this, _controller);

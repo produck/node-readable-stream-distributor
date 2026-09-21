@@ -680,7 +680,8 @@ sequenceDiagram
 **宿主可见**（只走类与事件，包出口不开符号表）：
 
 - 是否进入降级：`distributor.degraded`（观察 `$I.TRANSFERRER` 是否已
-  落位——相位只有一个事实来源）。
+  落位——相位只有一个事实来源）；**切换发生那一刻**另派 `degrade`
+  事件（载荷 `{ byteLength }`：切换当刻的 stash 字节数）。
 - 是否已终结可用性：`distributor.terminated`。
 - 积压：`warn('backlog', { byteLength })`（降级相，超阈值的每一笔都派）。
 - fork 上线、终结、可恢复异常：`fork` / `terminate` / `warn` 事件。
@@ -701,11 +702,12 @@ sequenceDiagram
 
 分发器是 `EventTarget`，当前已派发：
 
-| 事件        | 含义                   |
-| ----------- | ---------------------- |
-| `fork`      | 新 fork 上线           |
-| `terminate` | 分发器可用性终结被调用 |
-| `warn`      | 可恢复异常与观测信号   |
+| 事件        | 含义                      |
+| ----------- | ------------------------- |
+| `degrade`   | 内存相 → 介质相切换已发生 |
+| `fork`      | 新 fork 上线              |
+| `terminate` | 分发器可用性终结被调用    |
+| `warn`      | 可恢复异常与观测信号      |
 
 源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。`warn` 的
 code 现在有三个：`dump-failed` / `source-cancel-failed` / `backlog`（载荷随

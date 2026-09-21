@@ -4,6 +4,12 @@ export class DistributorEvent extends CustomEvent {
   }
 }
 
+export class DegradeEvent extends DistributorEvent {
+  constructor(byteLength) {
+    super('degrade', { byteLength });
+  }
+}
+
 export class ForkEvent extends DistributorEvent {
   constructor(forked) {
     super('fork', { forked });
@@ -22,4 +28,9 @@ export class WarnEvent extends DistributorEvent {
   }
 }
 
-export { ForkEvent as Fork, TerminateEvent as Terminate, WarnEvent as Warn };
+export {
+  DegradeEvent as Degrade,
+  ForkEvent as Fork,
+  TerminateEvent as Terminate,
+  WarnEvent as Warn,
+};

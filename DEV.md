@@ -136,7 +136,9 @@
 - 降级：**触发在消费代理**（stash 字节超过构造时定下的阈值），**执行在分发器** `$I.DEGRADE`——
   构造写侧实例（按读器家族 `_S.TRANSFERRER_CTOR` + 预置构造参数）、
   执行其 `dump`、遍历 registry、选降级 reader 类、换掉各 fork 的读取器
-  都留在结构侧。
+  都留在结构侧。**末尾派 `degrade` 事件**（载荷 `{ byteLength }`：入口处捕获的
+  stash 字节数；派发在相位翻转与逐拷贝交接**之后**，所以事件里 `get degraded`
+  已为真、监听者当场 `fork()` 拿到的也是降级读器）。
 - **两个落点写入器都是同步的**（`toStash` / `toTransferrer`）：`$I.WRITE` 是框架
   自己的同步成员（宿主要实现的是模板 `_I.WRITE`，它在 drain 里被 await），所以
   写侧那一趟不需要 `async`——await 一个永远 `undefined` 的成员只多花一拍微任务，
@@ -534,6 +536,22 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
   一次）；`$I.CANCELLED` 供 `pull` 早退与 `cancel` 幂等。
 - `start` 钩子只做一件事：把 controller 交给构造器局部变量，供入册用
   ——**不落字段**，controller 的唯一持有者是注册表。
+- **预取深度是一个选项**（`ForkHighWaterMark`，默认 `1`，2026-09-21 落）：
+  构造时读一次，作为 `ReadableStream` 的**第二参数**（排队长策）——不能塞进
+  第一个参数（那是 underlying source，塞进去等于没设；实测踩过这个坑）。
+  刻度已量（`logs/probe-fork-hwm.mjs`）：默认 `1` ⇒ 消费者读一笔时源已被拉 2
+  笔（总有一笔躺在流内队列里）；`0` ⇒ 零预取（源进度 1）；`4` ⇒ 队列躺 4 笔
+  （源进度 5）；小数按同一算式补拉（`1.5` ⇒ 3）；**`Infinity` 等于把源抽干**
+  （实测源那 10 笔全进队列），别当"更快"的旋钮用。它是"每个拷贝多占几笔内存"
+  与"源被推得多靠前"之间的刻度，也因此**决定降级交接时的播种进度**（预取那笔
+  会走老读器并推高它的消耗计数）。
+- **水标的断言是单独一条**（`Assert.HighWaterMark`）：按规范先 `ToNumber` 再判
+  ——`NaN` 或负数抛 **`RangeError`**，`Symbol`/`BigInt` 则走 ToNumber 中止的
+  `TypeError`（异常类跟规范，不用本仓的 `ThrowTypeError` 模板）。所以合法的值
+  是"非负**数值**"：小数、`Infinity`、以及 `'3'`/`null`/`true` 这类可转数值的值
+  （实测 `'3'` ⇒ 3、`null` ⇒ 0、`true` ⇒ 1）。**归一发生在流侧**（构造 fork
+  时），选项本身存的是宿主给的原值——`Get` / `snapshot` 回的是原值（设 `'3'`
+  读回 `'3'`，生效的是 3）。
 - **两个出口自己出表**：注册表在构造器闭包里捕获一次（经分发器的
   受保护符号 `$I.FORKED_READABLE_STREAM_REGISTRY` 取，不落自己的字段）；
   读到尾（`pull` 收到 `done`）与被 `cancel` 时各调一次 `prune(this)`。

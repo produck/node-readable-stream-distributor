@@ -105,6 +105,7 @@ class ReadableStreamDistributor extends EventTarget {
 
     const agent = this[A.I.AGENT];
     const stash = this[A.I.STASH];
+    const { byteLength } = stash;
     const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
 
     if (stash.done) {
@@ -127,6 +128,8 @@ class ReadableStreamDistributor extends EventTarget {
       bufferChunkReader[_A.BUFFER.$I.HANDOVER](reader);
       forked[_A.FORKED.$I.SET_DEGRADED_CHUNK_READER](reader);
     }
+
+    this.dispatchEvent(new Event.Degrade(byteLength));
   }
 
   terminate() {
