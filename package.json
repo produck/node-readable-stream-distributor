@@ -26,7 +26,8 @@
     "produck:lint": "eslint --fix . --max-warnings=0",
     "produck:publish": "npm run produck:publish:check && npm run publish --",
     "produck:publish:check": "npm run produck:install && npm run produck:coverage && npm run produck:commit:check",
-    "publish": "lerna publish"
+    "publish": "lerna publish",
+    "test": "npm run test --workspaces --if-present"
   },
   "workspaces": [
     "packages/main"
