@@ -22,7 +22,6 @@ export const I = deepFreeze({
 
 const $I_TERMINATION = Symbol('.$termination');
 const $I_TRANSFERRER = Symbol('.$transferrer');
-const $I_SET_TRANSFERRER_ARGS = Symbol('.$setTransferrerArgs()');
 const $I_DEGRADE = Symbol('.$degrade()');
 const $I_FORKED_READABLE_STREAM_REGISTRY = Symbol(
   '.$forkedReadableStreamRegistry',
@@ -34,7 +33,6 @@ export const $I = deepFreeze({
   FORKED_READABLE_STREAM_REGISTRY: $I_FORKED_READABLE_STREAM_REGISTRY,
   TERMINATION: $I_TERMINATION,
   TRANSFERRER: $I_TRANSFERRER,
-  SET_TRANSFERRER_ARGS: $I_SET_TRANSFERRER_ARGS,
   DEGRADE: $I_DEGRADE,
   DESTROYED: $I_DESTROYED,
   DESTROY: $I_DESTROY,

@@ -408,7 +408,7 @@ graph BT
     初始化——策略要 open / 定位时介质必已存在；`close()` await 它。
   - **写侧不在此类**：写侧类由家族静态 `_S.TRANSFERRER_CTOR`
     声明；分发器在降级时用它构造实例并持有，交接给本读取器。构造
-    参数由策略经 `$I.SET_TRANSFERRER_ARGS` 预置（家族的 `_S.PARSE_ARGUMENTS`
+    参数由策略经 `setTransferrerArgs()` 预置（家族的 `_S.PARSE_ARGUMENTS`
     归一，基类默认恒等），分发器不解释。
   - 转存产物（文件名/偏移等）可留在 Transferrer 实例自己的字段里——
     实例与 `ChunkStash` 1:1；`id` / 文件名等是降级策略内部细节，非
@@ -417,7 +417,7 @@ graph BT
 - `AbstractTransferrer` 是降级家族写侧的内部抽象（实例），介质中性；
   实例由分发器在降级时构造并持有（类取自读器家族的
   `_S.TRANSFERRER_CTOR`），与 `ChunkStash` 1:1；构造参数由策略
-  经 `$I.SET_TRANSFERRER_ARGS` 预置（`_S.PARSE_ARGUMENTS` 归一、默认恒等），
+  经 `setTransferrerArgs()` 预置（`_S.PARSE_ARGUMENTS` 归一、默认恒等），
   不解释：
   - **无阻塞调度的复杂性全在此作用域**：降级时**接管** stash 的整份
     块列表（同一批对象，只加引用），活块续在队尾——一条 FIFO
@@ -677,7 +677,8 @@ sequenceDiagram
 
 分发器不维护统一的状态快照，也不暴露 `stats` 之类的聚合对象。信号分两类：
 
-**宿主可见**（只走类与事件，包出口不开符号表）：
+**宿主可见**（公开成员 + 事件 + `SYMBOL` 里的 `_I` / `_S`；`I` / `$I` /
+`A` 不开）：
 
 - 是否进入降级：`distributor.degraded`（观察 `$I.TRANSFERRER` 是否已
   落位——相位只有一个事实来源）；**切换发生那一刻**另派 `degrade`

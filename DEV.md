@@ -81,6 +81,11 @@
   拆表之前存过一个二元回边（别名表读子表 + 子表向上借父表）；
   拆开后“向上借”落在 `_External.mjs` 这条叶子上，`_Symbol.mjs` 只定义
   不引用，环自然消失。
+- **宿主面 = 公开成员 + `_I` / `_S`**（后者经包出口的 `SYMBOL` 开出去，
+  按家族分组）。`I` / `$I` / `A` **不开**：宿主需要一项能力时，优先把它
+  _升格为公开成员_（例：写侧构造参数从 `$I.SET_TRANSFERRER_ARGS` 升为
+  `setTransferrerArgs()`、降级读器新增 `get transferrer()`），而不是把符号表
+  整个开出去——符号是内部的维护面，公开成员才是承诺面。
 
 ### 受保护实例字段与静态钩子（`_S`）
 
@@ -126,8 +131,8 @@
   （捕获的自身类）· 两个类值
   getter `I.DEGRADED_CHUNK_READER_CTOR` / `I.TRANSFERRER_CTOR`，以及当前
   相位字段 `I.CURRENT_CHUNK_READER_CTOR`（初值 `BufferChunkReader`，降级
-  换读器时置为前者）。受保护侧另有写侧实例与其待用构造参数：`$I.TRANSFERRER` /
-  `$I.SET_TRANSFERRER_ARGS(...)`（落 `I.TRANSFERRER_ARGS`，经写侧家族的
+  换读器时置为前者）。受保护侧另有写侧实例 `$I.TRANSFERRER`，及其待用构造参数的
+  **公开**入口 `setTransferrerArgs(...)`（落 `I.TRANSFERRER_ARGS`，经写侧家族的
   `_S.PARSE_ARGUMENTS` 归一——基类给了恒等默认，分发器自己不解释）。构造
   校验 source 为未锁定的 WHATWG ReadableStream。
 - 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（`$I.PUSH()` /
@@ -203,6 +208,40 @@
 - **读侧关闭的边界**：框架只保证「幂等」与「回收时调一次」；钩子
   `_I.CLOSE` 里**不得关介质**——介质是各读器共享的，归 `_I.DROP()`
   与 transferrer。算作读器自己的资源（比如独立日志通道）才在它的职责里。
+
+### Options（配置面）
+
+- **定位**：分发器的**唯一配置面**。`constructor(source)` 只收源，阈值一类的
+  配置成员全部退役（`$I.STASH_BYTE_LIMIT` 及其别名已删）；要读就
+  `Options.Get.*`，要改就 `Options.Tune.*`。
+- **文件**：`Options/index.mjs`（注册表：`OPTIONS` 槽位 + `Tune` / `Get` /
+  `install` / `snapshot`）、`Options/Items.mjs`（选项定义表）、
+  `Options/Assert.mjs`（断言实现）。**不在类设计规则体系内**：没有
+  `_Symbol.mjs` / `_External.mjs`，自带本地槽位符号，也不进
+  `Distributor/index.mjs` 的“只导出类”约定。
+- **形状**：每个分发器实例挂一张 **bag**（普通对象，键 = `item.name`，
+  值 = 取值器函数），放在实例的 `OPTIONS` 槽位（构造器里 `install(this)`
+  造一次）。`Get.X(distributor)` 读、`Tune.X(distributor, value)` 写
+  （值或取值器都收）、`snapshot()` / `get options` 拿一份**新建的**快照。
+  - **槽位而不是 WeakMap**：构造期 `this` 是裸实例、之后拿到的是代理，
+    WeakMap 按身份键控会两边对不上（实测踩过）；符号字段在代理与裸实例上
+    读写的是同一份。
+  - **默认值可以是取值器**（引用另一项）：`MaxBacklogWarningByteLength`
+    默认**跟随** `MaxStashByteLength`，读时才求值——所以 `items` 的数组
+    顺序不是契约。
+  - `Items.mjs` 是**叶子**（只 import `Assert.mjs`）：一旦 import 注册表就
+    成环 `index ↔ Items`，且从 `Items.mjs` 先进进程会
+    `Cannot access 'items' before initialization`。默认值里要复用另一项
+    就读 bag（`(options) => options.X(options)`）；**不能**写
+    `Get.X(bag)`——`Get` 内部读槽位，传 bag 进去是 `undefined`。
+- **断言**：`Assert.NonNegativeInteger` / `Boolean` / `HighWaterMark`。
+  `Tune` 是**唯一断言点**（坏值不落袋），`install` 不断言——默认值信任
+  作者。`HighWaterMark` 按规范口径：先 `ToNumber` 再判，`NaN`/负数抛
+  `RangeError`，`Symbol`/`BigInt` 抛 ToNumber 中止的 `TypeError`；归一
+  发生在流侧，`Get` 回的是宿主给的原值。
+- **读取时机逐项不同**，写在 `Items.mjs` 每项的头一行注释里（每趟 pull /
+  每笔写 / 每个 fork 构造一次）。这条不是风格：`Tune` 之后"为什么不生效"
+  只能靠它回答（`ForkHighWaterMark` 只管之后新建的拷贝）。
 
 ### SourceConsumptionAgent（消费代理）
 

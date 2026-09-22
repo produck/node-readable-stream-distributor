@@ -23,6 +23,10 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     return this[I.CLOSED];
   }
 
+  get transferrer() {
+    return this[$I.TRANSFERRER];
+  }
+
   [$I.REQUEST_INITIALIZE](progress) {
     this[_A.READER.A.$I.CONSUMED_COUNT] = progress;
     this[I.INITIALIZED] = this[I.INITIALIZE]();

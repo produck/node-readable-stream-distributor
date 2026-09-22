@@ -131,7 +131,7 @@ Promise"这一事实：
 >
 > 2026-09-15 修订：Transferrer 由策略级单例改为**分发器持有、降级时
 > 构造**的实例——类由降级读器家族静态给出（`_S.TRANSFERRER_CTOR`），
-> 构造参数经 `$I.SET_TRANSFERRER_ARGS(...)` 预置（写侧家族的
+> 构造参数经 `setTransferrerArgs()` 预置（写侧家族的
 > `_S.PARSE_ARGUMENTS` 归一、基类默认恒等，分发器不解释），
 > 实例与 `ChunkStash` 1:1；原一次性静态成员 `transferrer` 的配置方式取消。
 > 与 stash 的绑定仍发生在 `dump(chunkStash)`。
@@ -174,7 +174,7 @@ Promise"这一事实：
   目录、文件句柄、路径），也不提供 `id`——`id` / 文件名等属降级
   策略内部细节。
   2026-09-15：降级时另向各拷贝读器交接写侧实例（构造参数由策略经
-  `$I.SET_TRANSFERRER_ARGS` 预置，分发器只存转、不解释）。
+  `setTransferrerArgs()` 预置，分发器只存转、不解释）。
 - **`AbstractDegradedChunkReader` 抽象中间层（纯读）**：降级读取器家族
   的统一基类。写侧不在本类（2026-09-07 迁往 Transferrer）：
   - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`（已认可：

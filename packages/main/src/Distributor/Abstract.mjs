@@ -78,7 +78,7 @@ class ReadableStreamDistributor extends EventTarget {
     return forked;
   }
 
-  [$I.SET_TRANSFERRER_ARGS](...args) {
+  setTransferrerArgs(...args) {
     if (this.degraded) {
       Ow.Error.Common('Transferrer args have been consumed');
     }
