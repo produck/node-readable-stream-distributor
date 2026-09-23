@@ -50,6 +50,9 @@ Deltas against `.github/instructions/produck/12-produck-test.instructions.md`.
 - Test files reach it as `#test/baseline.mjs`, never by a relative path.
 - Domain-specific expectation objects (error texts) and domain-specific
   fixtures stay in their own `.test.mjs`.
+- A stub implements `_I` and `_S` only, because those are the contract's empty
+  slots. `$I` (the protected driver) and `I` (private) are read-only for a
+  test: never redefine one, never call one.
 
 ## Focused runs
 

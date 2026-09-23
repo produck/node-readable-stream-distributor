@@ -34,3 +34,10 @@ Deltas against `.github/instructions/produck/10-produck-node.instructions.md`.
   for the test tree; no test file counts `../` segments to reach a fixture.
 - Both serve the test side only: `src/` keeps relative imports, so the
   published package and its internal wiring are untouched.
+- Suite subjects follow that surface; reading a field it does not expose is
+  allowed too, so a test may import an internal symbol module
+  (`src/Distributor/_Symbol.mjs` or `src/.../ForkedReadableStream/_Symbol.mjs`)
+  and take a handle from it. The call chain itself still starts on the public
+  surface: a test drives the distributor through `fork()`, `destroy()`,
+  `Options.Tune` and the stream, never by calling an internal member it
+  reached through a symbol.

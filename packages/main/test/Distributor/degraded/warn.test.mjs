@@ -39,6 +39,28 @@ it('should dispatch warn(dump-failed) when the dump fails', async () => {
   assert.equal(warns[0].payload.cause, refused);
 });
 
-it('should dispatch warn(backlog) once the backlog is over the limit', () => {
-  // TODO
+it('should dispatch warn(backlog) once the backlog is over the limit', async () => {
+  class HangingWriteTransferrer extends TestTransferrer {
+    [TRANSFERRER.WRITE]() {
+      return new Promise(() => {});
+    }
+  }
+
+  const family = makeFamily({ medium: HangingWriteTransferrer });
+  const distributor = new family.Distributor(makeSource(['a', 'bb', 'ccc']));
+  const reading = distributor.fork().getReader();
+  const warns = [];
+
+  distributor.addEventListener('warn', (event) => warns.push(event.detail));
+
+  Options.Tune.MaxStashByteLength(distributor, 0);
+  Options.Tune.MaxBacklogWarningByteLength(distributor, 3);
+
+  await reading.read();
+  await reading.read();
+  await reading.read();
+
+  assert.equal(warns.length, 1);
+  assert.equal(warns[0].code, 'backlog');
+  assert.equal(warns[0].payload.byteLength, 5);
 });

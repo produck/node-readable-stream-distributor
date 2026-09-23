@@ -9,6 +9,9 @@ const { DEGRADED_CHUNK_READER_CTOR } = SYMBOL.DISTRIBUTOR._S;
 const { _I: READER, _S: READER_S } = SYMBOL.DEGRADED_CHUNK_READER;
 const { _I: TRANSFERRER } = SYMBOL.TRANSFERRER;
 
+const MEDIUM = Symbol('.#medium');
+const CURSOR = Symbol('.#cursor');
+
 export const makeSource = (chunks = []) => {
   let pulled = 0;
 
@@ -41,29 +44,55 @@ export const settle = async (turns = 6) => {
 };
 
 export class TestTransferrer extends Transferrer {
+  [MEDIUM] = [];
+
   constructor(...args) {
     super();
     this.args = args;
   }
 
-  [TRANSFERRER.DUMP]() {}
+  [TRANSFERRER.DUMP](stash) {
+    this[MEDIUM] = [...stash.chunks()];
+  }
 
-  [TRANSFERRER.WRITE]() {}
+  async [TRANSFERRER.WRITE](buffer) {
+    this[MEDIUM].push(buffer);
+  }
 
   [TRANSFERRER.DROP]() {}
+
+  get medium() {
+    return this[MEDIUM];
+  }
 }
 
 export class TestDegradedChunkReader extends DegradedChunkReader {
   static [READER_S.TRANSFERRER_CTOR] = TestTransferrer;
 
+  [CURSOR] = 0;
+
   [READER.INITIALIZE]() {}
 
   [READER.SEEK]() {
-    return false;
+    if (this[CURSOR] >= this.transferrer.medium.length) {
+      return false;
+    }
+
+    this[CURSOR]++;
+
+    return true;
   }
 
   [READER.READ]() {
-    return { done: true, value: undefined };
+    const medium = this.transferrer.medium;
+
+    if (this[CURSOR] >= medium.length) {
+      return { done: true, value: undefined };
+    }
+
+    const value = medium[this[CURSOR]++];
+
+    return { done: false, value };
   }
 
   [READER.CLOSE]() {}

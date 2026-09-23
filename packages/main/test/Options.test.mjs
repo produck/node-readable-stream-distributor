@@ -191,8 +191,24 @@ describe('Options', () => {
         assert.equal(reads(), chunks.length + 1);
       });
 
-      it('should stop being read once the phase has flipped', () => {
-        // TODO
+      it('should stop being read once the phase has flipped', async () => {
+        const distributor = makeDistributor(['a', 'b', 'c']);
+        const tune = Tune.MaxStashByteLength;
+        const reads = countGetterReads(distributor, tune, 0);
+        const reader = distributor.fork().getReader();
+
+        Tune.MaxBacklogWarningByteLength(distributor, LIMIT);
+
+        await reader.read();
+
+        assert.equal(distributor.degraded, true);
+
+        const atSwitch = reads();
+
+        await reader.read();
+        await reader.read();
+
+        assert.equal(reads(), atSwitch);
       });
     });
 
@@ -211,8 +227,23 @@ describe('Options', () => {
         assert.equal(Get.MaxBacklogWarningByteLength(distributor), 9);
       });
 
-      it('should be read after every write to the medium', () => {
-        // TODO
+      it('should be read after every write to the medium', async () => {
+        const distributor = makeDistributor(['a', 'b', 'c']);
+        const tune = Tune.MaxBacklogWarningByteLength;
+        const reads = countGetterReads(distributor, tune, LIMIT);
+        const reader = distributor.fork().getReader();
+
+        Tune.MaxStashByteLength(distributor, 0);
+
+        await reader.read();
+
+        const atSwitch = reads();
+
+        await reader.read();
+        assert.equal(reads(), atSwitch + 1);
+
+        await reader.read();
+        assert.equal(reads(), atSwitch + 2);
       });
     });
 
@@ -221,8 +252,18 @@ describe('Options', () => {
         assert.equal(Get.DegradeOnStashFullAndDone(makeDistributor()), false);
       });
 
-      it('should be read on the pull that crossed the limit', () => {
-        // TODO
+      it('should be read on the pull that crossed the limit', async () => {
+        const distributor = makeDistributor(['a', 'b']);
+        const tune = Tune.DegradeOnStashFullAndDone;
+        const reads = countGetterReads(distributor, tune, true);
+        const reader = distributor.fork().getReader();
+
+        Tune.MaxStashByteLength(distributor, 0);
+
+        await reader.read();
+
+        assert.equal(distributor.degraded, true);
+        assert.equal(reads(), 1);
       });
     });
 

@@ -60,10 +60,19 @@ describe('.fork()', () => {
 
     const second = distributor.fork();
 
-    assert.deepEqual(await drain(second), []);
+    assert.deepEqual(await drain(second), ['a']);
   });
 
   it('should dispatch the fork event once', () => {
-    // TODO
+    const distributor = new TestDistributor(makeSource());
+    const forked = [];
+
+    distributor.addEventListener('fork', (event) => {
+      forked.push(event.detail.forked);
+    });
+
+    const copy = distributor.fork();
+
+    assert.deepEqual(forked, [copy]);
   });
 });
