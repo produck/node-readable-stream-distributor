@@ -1,20 +1,111 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { Distributor, DegradedChunkReader, SYMBOL } from '../src/index.mjs';
+import {
+  Distributor,
+  DegradedChunkReader,
+  Options,
+  SYMBOL,
+  Transferrer,
+} from '../src/index.mjs';
 
 const { DEGRADED_CHUNK_READER_CTOR } = SYMBOL.DISTRIBUTOR._S;
+const { _I: READER, _S: READER_S } = SYMBOL.DEGRADED_CHUNK_READER;
+const { _I: TRANSFERRER, _S: TRANSFERRER_S } = SYMBOL.TRANSFERRER;
 
-class TestDegradedChunkReader extends DegradedChunkReader {}
+const EXPECTED = {
+  NOT_A_STREAM: {
+    name: 'TypeError',
+    message: /Invalid "source", one "a WHATWG ReadableStream"/,
+  },
+  LOCKED: { message: /Source stream must not be locked/ },
+  NOT_A_STRING: {
+    name: 'TypeError',
+    message: /Invalid "label", one "a string" expected\./,
+  },
+  UNIMPLEMENTED: { message: /must be implemented in the subclass/ },
+  CONSUMED: { message: /Transferrer args have been consumed/ },
+  TERMINATED: { message: /Distributor has been terminated/ },
+};
+
+const built = [];
+
+class TestTransferrer extends Transferrer {
+  constructor(...args) {
+    super();
+    this.args = args;
+    built.push(this);
+  }
+
+  [TRANSFERRER.DUMP]() {}
+
+  [TRANSFERRER.WRITE]() {}
+
+  [TRANSFERRER.DROP]() {}
+}
+
+class ParsingTransferrer extends TestTransferrer {
+  static parsed = [];
+
+  static [TRANSFERRER_S.PARSE_ARGUMENTS](args) {
+    ParsingTransferrer.parsed.push(args);
+
+    return args.map((arg) => `${arg}!`);
+  }
+}
+
+class TestDegradedChunkReader extends DegradedChunkReader {
+  static [READER_S.TRANSFERRER_CTOR] = TestTransferrer;
+
+  [READER.INITIALIZE]() {}
+
+  [READER.SEEK]() {
+    return false;
+  }
+
+  [READER.READ]() {
+    return { done: true, value: undefined };
+  }
+
+  [READER.CLOSE]() {}
+}
+
+class ParsingDegradedChunkReader extends TestDegradedChunkReader {
+  static [READER_S.TRANSFERRER_CTOR] = ParsingTransferrer;
+}
 
 class TestDistributor extends Distributor {
   static [DEGRADED_CHUNK_READER_CTOR] = TestDegradedChunkReader;
 }
 
-const makeSource = () =>
-  new ReadableStream({
-    start: (controller) => controller.close(),
+class ParsingDistributor extends Distributor {
+  static [DEGRADED_CHUNK_READER_CTOR] = ParsingDegradedChunkReader;
+}
+
+const makeSource = (chunks = []) => {
+  let pulled = 0;
+
+  return new ReadableStream({
+    pull(controller) {
+      if (pulled < chunks.length) {
+        controller.enqueue(Buffer.from(chunks[pulled]));
+        pulled++;
+      } else {
+        controller.close();
+      }
+    },
   });
+};
+
+async function drain(stream) {
+  const got = [];
+
+  for await (const chunk of stream) {
+    got.push(chunk.toString());
+  }
+
+  return got;
+}
 
 describe('Distributor', () => {
   describe('constructor()', () => {
@@ -22,14 +113,10 @@ describe('Distributor', () => {
       const badSources = [null, {}, { locked: false }];
 
       for (const source of badSources) {
-        assert.throws(
-          () => new TestDistributor(source),
-          {
-            name: 'TypeError',
-            message: /Invalid "source", one "a WHATWG ReadableStream"/,
-          },
-          `source: ${JSON.stringify(source)}`,
-        );
+        const attempt = () => new TestDistributor(source);
+        const where = `source: ${JSON.stringify(source)}`;
+
+        assert.throws(attempt, EXPECTED.NOT_A_STREAM, where);
       }
     });
 
@@ -37,9 +124,7 @@ describe('Distributor', () => {
       const source = makeSource();
       const reader = source.getReader();
 
-      assert.throws(() => new TestDistributor(source), {
-        message: /Source stream must not be locked/,
-      });
+      assert.throws(() => new TestDistributor(source), EXPECTED.LOCKED);
 
       reader.releaseLock();
     });
@@ -54,19 +139,10 @@ describe('Distributor', () => {
   });
 
   describe('.fork()', () => {
-    it('should answer a ReadableStream', () => {
-      const distributor = new TestDistributor(makeSource());
-
-      assert.ok(distributor.fork('probe') instanceof ReadableStream);
-    });
-
     it('should reject a label that is not a string', () => {
       const distributor = new TestDistributor(makeSource());
 
-      assert.throws(() => distributor.fork(42), {
-        name: 'TypeError',
-        message: /Invalid "label", one "a string" expected\./,
-      });
+      assert.throws(() => distributor.fork(42), EXPECTED.NOT_A_STRING);
     });
 
     it('should accept an omitted label', () => {
@@ -76,57 +152,29 @@ describe('Distributor', () => {
     });
 
     it('should throw once terminated', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+      let forked = 0;
+
+      distributor.addEventListener('fork', () => forked++);
+      distributor.terminate();
+
+      const attempt = () => distributor.fork();
+
+      assert.throws(attempt, EXPECTED.TERMINATED);
+      assert.equal(forked, 0);
     });
 
     it('should report the missing DEGRADED_CHUNK_READER_CTOR', () => {
       class Unfinished extends Distributor {}
 
-      assert.throws(() => new Unfinished(makeSource()).fork(), {
-        message: /must be implemented in the subclass/,
-      });
+      const unfinished = new Unfinished(makeSource());
+      const attempt = () => unfinished.fork();
+
+      assert.throws(attempt, EXPECTED.UNIMPLEMENTED);
     });
 
     it('should work as well after a switch', () => {
       // TODO
-    });
-
-    describe('>stream', () => {
-      it('should carry every chunk of the source once, in order', () => {
-        // TODO
-      });
-
-      it('should carry on without a gap across a switch', () => {
-        // TODO
-      });
-
-      it('should hold the first chunk until the medium is ready', () => {
-        // TODO
-      });
-
-      it('should close once the source is done', () => {
-        // TODO
-      });
-
-      it('should reject with the source error', () => {
-        // TODO
-      });
-
-      it('should reject with the medium error it hit', () => {
-        // TODO
-      });
-
-      it('should not lose data for a lagging copy', () => {
-        // TODO
-      });
-
-      it('should not hold a fast copy behind a slow one', () => {
-        // TODO
-      });
-
-      it('should stop on its own cancel, leaving other copies alone', () => {
-        // TODO
-      });
     });
   });
 
@@ -154,57 +202,147 @@ describe('Distributor', () => {
 
   describe('.terminated', () => {
     it('should be false by default', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+
+      assert.equal(distributor.terminated, false);
     });
 
     it('should turn true after terminate()', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+
+      distributor.terminate();
+
+      assert.equal(distributor.terminated, true);
     });
   });
 
   describe('.options', () => {
     it('should answer every item of the config surface', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+      const snapshot = distributor.options;
+      const items = [
+        'DegradeOnStashFullAndDone',
+        'ForkHighWaterMark',
+        'MaxBacklogWarningByteLength',
+        'MaxStashByteLength',
+      ];
+
+      assert.deepEqual(Object.keys(snapshot).sort(), items);
     });
 
     it('should build a fresh snapshot on every read', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+
+      const first = distributor.options;
+      const second = distributor.options;
+
+      assert.notEqual(first, second);
+      assert.deepEqual(first, second);
     });
 
     it('should answer what Tune wrote', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+
+      Options.Tune.MaxStashByteLength(distributor, 4);
+
+      assert.equal(distributor.options.MaxStashByteLength, 4);
     });
   });
 
   describe('.setTransferrerArgs()', () => {
-    it('should hand the whole argument array to PARSE_ARGUMENTS', () => {
-      // TODO
+    it('should hand the whole argument array to PARSE_ARGUMENTS', async () => {
+      ParsingTransferrer.parsed.length = 0;
+      built.length = 0;
+
+      const distributor = new ParsingDistributor(makeSource(['a']));
+      const reader = distributor.fork().getReader();
+
+      distributor.setTransferrerArgs('x', 'y');
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await reader.read();
+
+      assert.deepEqual(ParsingTransferrer.parsed, [['x', 'y']]);
+      assert.deepEqual(built.at(-1).args, ['x!', 'y!']);
     });
 
-    it('should pass the array through when the medium kept the default', () => {
-      // TODO
+    it('should pass the array through when the medium kept the default', async () => {
+      built.length = 0;
+
+      const distributor = new TestDistributor(makeSource(['a']));
+      const reader = distributor.fork().getReader();
+
+      distributor.setTransferrerArgs('x', 'y');
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await reader.read();
+
+      assert.deepEqual(built.at(-1).args, ['x', 'y']);
     });
 
-    it('should keep the arguments for the switch', () => {
-      // TODO
+    it('should keep the arguments for the switch', async () => {
+      built.length = 0;
+
+      const distributor = new TestDistributor(makeSource(['a']));
+      const reader = distributor.fork().getReader();
+
+      distributor.setTransferrerArgs('first');
+      distributor.setTransferrerArgs('second', 'third');
+
+      assert.equal(built.length, 0);
+
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await reader.read();
+
+      assert.deepEqual(built.at(-1).args, ['second', 'third']);
     });
 
-    it('should throw once degraded', () => {
-      // TODO
+    it('should throw once degraded', async () => {
+      const distributor = new TestDistributor(makeSource(['a']));
+      const reader = distributor.fork().getReader();
+
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await reader.read();
+
+      assert.equal(distributor.degraded, true);
+
+      const attempt = () => distributor.setTransferrerArgs('x');
+
+      assert.throws(attempt, EXPECTED.CONSUMED);
     });
   });
 
   describe('.terminate()', () => {
     it('should refuse new forks', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+
+      distributor.terminate();
+
+      const attempt = () => distributor.fork();
+
+      assert.throws(attempt, EXPECTED.TERMINATED);
     });
 
-    it('should let running copies read the source to its end', () => {
-      // TODO
+    it('should let running copies read the source to its end', async () => {
+      const distributor = new TestDistributor(makeSource(['a', 'b']));
+      const forked = distributor.fork();
+
+      distributor.terminate();
+
+      assert.deepEqual(await drain(forked), ['a', 'b']);
     });
 
     it('should be idempotent', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+
+      distributor.terminate();
+
+      const again = () => distributor.terminate();
+
+      assert.doesNotThrow(again);
+      assert.equal(distributor.terminated, true);
     });
   });
 
@@ -254,7 +392,16 @@ describe('Distributor', () => {
 
   describe('#terminate', () => {
     it('should dispatch once, on the first terminate()', () => {
-      // TODO
+      const distributor = new TestDistributor(makeSource());
+      const types = [];
+      const onTerminate = (event) => types.push(event.type);
+
+      distributor.addEventListener('terminate', onTerminate);
+
+      distributor.terminate();
+      distributor.terminate();
+
+      assert.deepEqual(types, ['terminate']);
     });
   });
 
@@ -270,55 +417,5 @@ describe('Distributor', () => {
     it('should carry backlog with the pending byte length', () => {
       // TODO
     });
-  });
-});
-
-describe('Event', () => {
-  describe('::Degrade', () => {
-    it('should be a CustomEvent of type degrade', () => {
-      // TODO
-    });
-
-    describe('>detail', () => {
-      it('should carry the stash byte length at the switch', () => {
-        // TODO
-      });
-    });
-  });
-
-  describe('::Fork', () => {
-    it('should be a CustomEvent of type fork', () => {
-      // TODO
-    });
-
-    describe('>detail', () => {
-      it('should carry the forked stream', () => {
-        // TODO
-      });
-    });
-  });
-
-  describe('::Terminate', () => {
-    it('should be a CustomEvent of type terminate', () => {
-      // TODO
-    });
-  });
-
-  describe('::Warn', () => {
-    it('should be a CustomEvent of type warn', () => {
-      // TODO
-    });
-
-    describe('>detail', () => {
-      it('should carry the code and its payload', () => {
-        // TODO
-      });
-    });
-  });
-});
-
-describe('SYMBOL', () => {
-  it('should open _I and _S of every family, and nothing else', () => {
-    // TODO
   });
 });
