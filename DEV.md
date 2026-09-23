@@ -204,10 +204,44 @@
   只会得到一个被流吞掉的拒绝，读侧观感不变。
 - **已完成**：两相都随 `$I.DROP()` 放开（内存相的块 / 降级相的队列与
   介质句柄，见 Transferrer 一节），术语与 `ChunkStash.$I.DROP()` 对齐；
-  读器随 `$I.CLOSE()` 关闭（回收时调用＋幂等，资源语义归宿主）。
-- **读侧关闭的边界**：框架只保证「幂等」与「回收时调一次」；钩子
-  `_I.CLOSE` 里**不得关介质**——介质是各读器共享的，归 `_I.DROP()`
-  与 transferrer。算作读器自己的资源（比如独立日志通道）才在它的职责里。
+  读器随 `$I.CLOSE()` 关闭（见下）。
+- **读侧关闭的时机（2026-09-23 扩到三处）**：拷贝的流结束时立刻关——
+  正常读完（`done`）、读抛出（源 / 介质错误）、拷贝自己 `cancel()`；再加上
+  `destroy()` 的收摊。流侧结束会 `prune`，所以收摊通常扫不到它们，但
+  **不保证**：`destroy()` 当场若有一笔读在飞，它随后以失败落定会再走一次
+  流侧收尾——“每条拷贝一生最多关一次”靠 `I.CLOSED` 幂等兑住，不靠互斥。
+- **`destroy()` 撞上在途读：两个落定分支（2026-09-23 实测）**：
+  `$I.DESTROY` 的同步段遍历注册表，先关读器、再 `error` + `prune`，
+  全在第一个 `await` 之前，插不进任何东西——所以“撞不撞上”只是
+  一个状态判定：`destroy()` 当场该拷贝有没有一笔读在飞。
+  之后按落定分岔，两支都会走到：
+  - **失败** ⇒ `pull` 的 catch 收尾 ⇒ 第二次 `$I.CLOSE`——
+    由 `I.CLOSED` 挡下（见上一条）。
+  - **值 / `done`** ⇒ `controller.enqueue()` / `close()` 在已 `error`
+    的流上**先抛 `TypeError`**，`conclude()` 整条不走（连带 `prune`
+    也跳过——收摊已 prune 过，无积压），这个 `TypeError` 被平台吞掉，
+    不产生未处理拒绝（不落进 `unhandledRejection`）。
+- **降级相在途读的悬挂点只有一个：`ensure()` 里等源的那笔 `read()`**，不是
+  `$I.WAIT_POSITION`。后者的等待窗在现有路径下观测不到：记账恒等式
+  `WRITTEN_COUNT + PENDING_CHUNKS.length === 已拉取数`，而 `ensure()`
+  返回时已保证 `total > position`，`SETTLE()` 在同一个调用里放行——
+  没有可供撞上的间隙。
+- **源被 `cancel` 后在途那笔读不是拒绝，是 `{done: true}`**：
+  `SOURCE_READER.READ` 的 catch 因 `I.CANCELLED` 已置位而不落错误。所以
+  降级在途读被 destroy 撞上时走的是“值 / `done`”那一支：`WAIT_POSITION`
+  以 `accepted=false` 且 `I.ERROR === null` 放行（不抛）、继续进宿主
+  `_I.READ`、以 `done` 落定、`close()` 抛出、`conclude()` 不走。
+  所以降级相的真实 destroy 收尾走的是“值 / `done`”支；失败支要介质当场
+  也在报错（用例用宿主 `_I.READ` 拒绝来安排）。
+- **实测 `logs/probe-degraded-suspend.mjs`**：宿主 `_I.READ` 调用数在
+  destroy 前后 1 → 2，是“确实越过了 `WAIT_POSITION`”的直接证据；`_I.CLOSE`
+  计数 1、未处理拒绝 0。同一探针的第三支说明这条放行路径就是降级态读到
+  源尾的**常规**收尾（读到 `done`，`conclude()` 在活流上跑完，`prune` 也
+  照常）。平台契约两支（`close()` / `enqueue()` 在已 error 的流上抛
+  `TypeError`；`pull` 里未捕获的抛出不算未处理拒绝）也在同一文件里。
+- **读侧关闭的边界**：钩子 `_I.CLOSE` 里**不得关介质**——介质是各读器
+  共享的，归 `_I.DROP()` 与 transferrer。算作读器自己的资源（比如独立
+  日志通道）才在它的职责里；资源语义归宿主。
 
 ### Options（配置面）
 
@@ -580,7 +614,13 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
 
 - `extends ReadableStream`；`get $I.CHUNK_READER` 读当前读器，
   `$I.SET_DEGRADED_CHUNK_READER(reader)` 是唯一的换入口（降级时用，只此
-  一次）；`$I.CANCELLED` 供 `pull` 早退与 `cancel` 幂等。
+  一次）。**流上不留早退位、源码里也不解释（2026-09-23 删）**：标准自己
+  就是依据，替它写一句注释等于把“平台行为”降格成“我们的假设”，维护者
+  在源码里看到空位是自然的。机制是两条：`pull` 不会在流离开 `readable`
+  后再被调（`ShouldCallPull` 先过 `CanCloseOrEnqueue`）；`cancel` 也不会
+  第二次到达回调（已 closed 的流由 `ReadableStreamCancel` 直接答 resolve）。
+  实测 `logs/probe-pull-after-end.mjs` 三支的 `pull` 计数都停在 1；
+  `I.DONE` / `$I.CANCELLED` 两字段随之退役。
 - `start` 钩子只做一件事：把 controller 交给构造器局部变量，供入册用
   ——**不落字段**，controller 的唯一持有者是注册表。
 - **预取深度是一个选项**（`ForkHighWaterMark`，默认 `1`，2026-09-21 落）：

@@ -58,7 +58,9 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   [_A.READER.$I.CLOSE]() {
-    // TODO: no case reaches this — destroy() closes each copy once.
+    // A read in flight when destroy() fires concludes its own stream once
+    //   it settles — if it settles as a failure, this arrives a second
+    //   time. The flag keeps that second arrival from reaching _I.CLOSE.
     if (this[I.CLOSED]) {
       return;
     }
