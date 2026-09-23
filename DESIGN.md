@@ -15,7 +15,7 @@
 
 ```text
 主入口流（唯一真实来源）
-  → fork(label = '<UNDEFINED>') → ForkedReadableStream
+  → fork() → ForkedReadableStream
   → 每个拷贝流独立消费
   → 任一拷贝 cancel 不影响其他
   → 拷贝消费完毕（done）或 cancel 均自动清理引用
@@ -52,9 +52,7 @@ const distributor = new MyDistributor(source);
 // 注意：阈值经 `Options.Tune.MaxStashByteLength` 设定（默认 `1GiB`），
 // 一旦溢出到磁盘后 `MaxStashByteLength` 不再被查询（单向门）
 
-const copy = distributor.fork('sha1-checker');
-// label：助记符，用于事件和统计中标识拷贝，不作唯一性约束
-// 省略时默认 '<UNDEFINED>'
+const copy = distributor.fork();
 // → ForkedReadableStream（ReadableStream 子类）；无 unregister
 
 // 正常消费
@@ -140,7 +138,7 @@ classDiagram
         <<abstract>>
         +degraded
         +terminated
-        +fork(label)
+        +fork()
         +terminate()
         +destroy()
     }

@@ -52,11 +52,7 @@ class ReadableStreamDistributor extends EventTarget {
     return this[$I.TERMINATION] !== null;
   }
 
-  fork(label = '<UNDEFINED>') {
-    if (typeof label !== 'string') {
-      ThrowTypeError('label', 'a string');
-    }
-
+  fork() {
     if (this.terminated) {
       Ow.Error.Common('Distributor has been terminated');
     }
@@ -71,7 +67,7 @@ class ReadableStreamDistributor extends EventTarget {
       reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](0);
     }
 
-    const forked = new ForkedReadableStream.Concrete(this, reader, label);
+    const forked = new ForkedReadableStream.Concrete(this, reader);
 
     this.dispatchEvent(new Event.Fork(forked));
 

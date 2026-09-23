@@ -1,10 +1,8 @@
 import { deepFreeze } from '@produck/deep-freeze-enumerable';
 
-const I_LABEL = Symbol('.#label');
 const I_CHUNK_READER = Symbol('.#chunkReader');
 
 export const I = deepFreeze({
-  LABEL: I_LABEL,
   CHUNK_READER: I_CHUNK_READER,
 });
 

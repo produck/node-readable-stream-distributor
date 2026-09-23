@@ -6,27 +6,11 @@ import { Distributor, Options } from '@produck/readable-stream-distributor';
 import { drain, makeSource, TestDistributor } from '#test/baseline.mjs';
 
 const EXPECTED = {
-  NOT_A_STRING: {
-    name: 'TypeError',
-    message: /Invalid "label", one "a string" expected\./,
-  },
   UNIMPLEMENTED: { message: /must be implemented in the subclass/ },
   TERMINATED: { message: /Distributor has been terminated/ },
 };
 
 describe('.fork()', () => {
-  it('should reject a label that is not a string', () => {
-    const distributor = new TestDistributor(makeSource());
-
-    assert.throws(() => distributor.fork(42), EXPECTED.NOT_A_STRING);
-  });
-
-  it('should accept an omitted label', () => {
-    const distributor = new TestDistributor(makeSource());
-
-    assert.doesNotThrow(() => distributor.fork());
-  });
-
   it('should throw once terminated', () => {
     const distributor = new TestDistributor(makeSource());
     let forked = 0;

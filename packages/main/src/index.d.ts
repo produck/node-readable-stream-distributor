@@ -109,7 +109,7 @@ export declare abstract class Distributor<
   get degraded(): boolean;
   get terminated(): boolean;
 
-  fork(label?: string): ReadableStream<Chunk>;
+  fork(): ReadableStream<Chunk>;
   setTransferrerArgs(...args: unknown[]): void;
   terminate(): void;
   destroy(): Promise<void>;

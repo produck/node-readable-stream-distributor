@@ -113,15 +113,17 @@
 ### Distributor（分发器）
 
 - `extends EventTarget`（WHATWG，不依赖 Node EventEmitter）。
-- 公开面：`fork(label = '<UNDEFINED>')` 注册消费拷贝并返回
-  `ForkedReadableStream`（`label` 助记符，默认占位串 `'<UNDEFINED>'`，
-  须为 string）——读器取自当前相位字段 `I.CURRENT_CHUNK_READER_CTOR`
-  （初值 `BufferChunkReader`，降级换读器的同一同步块里翻成策略类，后者
-  当场 `$I.REQUEST_INITIALIZE(0)` 播种）；`get degraded`（观察自己的
+- 公开面：`fork()` 注册消费拷贝并返回 `ForkedReadableStream`——读器取自
+  当前相位字段 `I.CURRENT_CHUNK_READER_CTOR`（初值 `BufferChunkReader`，
+  降级换读器的同一同步块里翻成策略类，后者当场
+  `$I.REQUEST_INITIALIZE(0)` 播种）；`get degraded`（观察自己的
   `$I.TRANSFERRER` 是否落位——相位只有一个事实来源）；`get terminated`
   （`$I.TERMINATION` 是否已落）；
   `terminate()`（只关闸门，幂等）；`destroy()`（关闸门 + 封口 + 切断源
   - 收摊；幂等，返回同一个 Promise）。
+- **`fork` 的 `label` 参数已废弃（2026-09-24）**：`fork()` 不再收助记符，
+  `I.LABEL` 与该构造参数一并删——它写进去但从没被读过，不进事件也不进
+  统计，留着只是死状态。
 - 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
   `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）·
   `$I.FORKED_READABLE_STREAM_REGISTRY`
