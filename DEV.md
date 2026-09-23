@@ -289,8 +289,7 @@
   - 在 `pull()` 里“作废已拉回的一笔” → `pulledChunkCount` 不前进、循环
     条件永远成立 → 把源一路抽干、每笔都丢掉、读侧永不返回。
 - `finished` 的由来：`SourceReader.READ` 在 `CANCELLED` 之后**不再写
-  `DONE`**，而 `read()` 一进门就短路答 `{done:true}`——只看 `done` 的
-  循环会对着已收摊的源每圈 `SET_DONE` 一次。
+  `DONE`**——只看 `done` 的循环会对着已收摊的源每圈 `SET_DONE` 一次。
 
 ### SourceReader（分发器侧拉取装置）
 

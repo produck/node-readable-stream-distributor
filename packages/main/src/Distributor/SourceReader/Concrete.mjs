@@ -31,11 +31,9 @@ export default class SourceReader {
   }
 
   async [I.READ]() {
-    // TODO: no case reaches this — ensure() stops pulling once cancelled.
-    if (this[I.CANCELLED]) {
-      return { done: true, value: undefined };
-    }
-
+    // Guarantee: `pull()` is the only caller of `read()`, and `ensure()`
+    //   starts no pull once `finished` (`done || cancelled`) is true — so a
+    //   read never starts after a cancel.
     const result = await this[I.READER].read().catch((cause) => {
       if (!this[I.CANCELLED]) {
         this[I.ERROR] = cause;
@@ -60,13 +58,9 @@ export default class SourceReader {
   }
 
   async cancel(reason) {
-    // TODO: no case reaches this — destroy() cancels the source once.
-    if (this[I.CANCELLED]) {
-      return;
-    }
-
+    // Guarantee: `$I.DESTROY` is the only caller, and it is cached by
+    //   `$I.DESTROYED`, so a cancel never arrives twice.
     this[I.CANCELLED] = true;
-
     await this[I.READER].cancel(reason);
   }
 }
