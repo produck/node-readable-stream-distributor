@@ -1,17 +1,21 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { Distributor, Options, SYMBOL } from '../src/index.mjs';
+
 import {
-  Distributor,
-  DegradedChunkReader,
-  Options,
-  SYMBOL,
-  Transferrer,
-} from '../src/index.mjs';
+  drain,
+  makeSource,
+  mediums,
+  settle,
+  TestDegradedChunkReader,
+  TestDistributor,
+  TestTransferrer,
+} from './baseline.mjs';
 
 const { DEGRADED_CHUNK_READER_CTOR } = SYMBOL.DISTRIBUTOR._S;
 const { _I: READER, _S: READER_S } = SYMBOL.DEGRADED_CHUNK_READER;
-const { _I: TRANSFERRER, _S: TRANSFERRER_S } = SYMBOL.TRANSFERRER;
+const { _S: TRANSFERRER_S } = SYMBOL.TRANSFERRER;
 
 const EXPECTED = {
   NOT_A_STREAM: {
@@ -26,23 +30,11 @@ const EXPECTED = {
   UNIMPLEMENTED: { message: /must be implemented in the subclass/ },
   CONSUMED: { message: /Transferrer args have been consumed/ },
   TERMINATED: { message: /Distributor has been terminated/ },
+  ABORTED: {
+    name: 'AbortError',
+    message: /The distributor has been terminated/,
+  },
 };
-
-const built = [];
-
-class TestTransferrer extends Transferrer {
-  constructor(...args) {
-    super();
-    this.args = args;
-    built.push(this);
-  }
-
-  [TRANSFERRER.DUMP]() {}
-
-  [TRANSFERRER.WRITE]() {}
-
-  [TRANSFERRER.DROP]() {}
-}
 
 class ParsingTransferrer extends TestTransferrer {
   static parsed = [];
@@ -54,57 +46,30 @@ class ParsingTransferrer extends TestTransferrer {
   }
 }
 
-class TestDegradedChunkReader extends DegradedChunkReader {
-  static [READER_S.TRANSFERRER_CTOR] = TestTransferrer;
-
-  [READER.INITIALIZE]() {}
-
-  [READER.SEEK]() {
-    return false;
-  }
-
-  [READER.READ]() {
-    return { done: true, value: undefined };
-  }
-
-  [READER.CLOSE]() {}
-}
-
 class ParsingDegradedChunkReader extends TestDegradedChunkReader {
   static [READER_S.TRANSFERRER_CTOR] = ParsingTransferrer;
-}
-
-class TestDistributor extends Distributor {
-  static [DEGRADED_CHUNK_READER_CTOR] = TestDegradedChunkReader;
 }
 
 class ParsingDistributor extends Distributor {
   static [DEGRADED_CHUNK_READER_CTOR] = ParsingDegradedChunkReader;
 }
 
-const makeSource = (chunks = []) => {
-  let pulled = 0;
+class HangingDegradedChunkReader extends TestDegradedChunkReader {
+  static closed = [];
 
-  return new ReadableStream({
-    pull(controller) {
-      if (pulled < chunks.length) {
-        controller.enqueue(Buffer.from(chunks[pulled]));
-        pulled++;
-      } else {
-        controller.close();
-      }
-    },
-  });
-};
-
-async function drain(stream) {
-  const got = [];
-
-  for await (const chunk of stream) {
-    got.push(chunk.toString());
+  [READER.READ]() {
+    return new Promise(() => {});
   }
 
-  return got;
+  [READER.CLOSE]() {
+    HangingDegradedChunkReader.closed.push(this);
+
+    return new Promise(() => {});
+  }
+}
+
+class HangingDistributor extends Distributor {
+  static [DEGRADED_CHUNK_READER_CTOR] = HangingDegradedChunkReader;
 }
 
 describe('Distributor', () => {
@@ -176,6 +141,10 @@ describe('Distributor', () => {
     it('should work as well after a switch', () => {
       // TODO
     });
+
+    it('should dispatch the fork event once', () => {
+      // TODO
+    });
   });
 
   describe('.degraded', () => {
@@ -196,6 +165,26 @@ describe('Distributor', () => {
     });
 
     it('should stay false, rejecting the read, when the family is unfinished', () => {
+      // TODO
+    });
+
+    it('should dispatch the degrade event on the crossing pull', () => {
+      // TODO
+    });
+
+    it('should dispatch the degrade event with degraded already true', () => {
+      // TODO
+    });
+
+    it('should not dispatch the degrade event again on later pulls', () => {
+      // TODO
+    });
+
+    it('should dispatch warn(dump-failed) when the dump fails', () => {
+      // TODO
+    });
+
+    it('should dispatch warn(backlog) once the backlog is over the limit', () => {
       // TODO
     });
   });
@@ -252,7 +241,7 @@ describe('Distributor', () => {
   describe('.setTransferrerArgs()', () => {
     it('should hand the whole argument array to PARSE_ARGUMENTS', async () => {
       ParsingTransferrer.parsed.length = 0;
-      built.length = 0;
+      mediums.length = 0;
 
       const distributor = new ParsingDistributor(makeSource(['a']));
       const reader = distributor.fork().getReader();
@@ -263,11 +252,11 @@ describe('Distributor', () => {
       await reader.read();
 
       assert.deepEqual(ParsingTransferrer.parsed, [['x', 'y']]);
-      assert.deepEqual(built.at(-1).args, ['x!', 'y!']);
+      assert.deepEqual(mediums.at(-1).args, ['x!', 'y!']);
     });
 
     it('should pass the array through when the medium kept the default', async () => {
-      built.length = 0;
+      mediums.length = 0;
 
       const distributor = new TestDistributor(makeSource(['a']));
       const reader = distributor.fork().getReader();
@@ -277,11 +266,11 @@ describe('Distributor', () => {
 
       await reader.read();
 
-      assert.deepEqual(built.at(-1).args, ['x', 'y']);
+      assert.deepEqual(mediums.at(-1).args, ['x', 'y']);
     });
 
     it('should keep the arguments for the switch', async () => {
-      built.length = 0;
+      mediums.length = 0;
 
       const distributor = new TestDistributor(makeSource(['a']));
       const reader = distributor.fork().getReader();
@@ -289,13 +278,13 @@ describe('Distributor', () => {
       distributor.setTransferrerArgs('first');
       distributor.setTransferrerArgs('second', 'third');
 
-      assert.equal(built.length, 0);
+      assert.equal(mediums.length, 0);
 
       Options.Tune.MaxStashByteLength(distributor, 0);
 
       await reader.read();
 
-      assert.deepEqual(built.at(-1).args, ['second', 'third']);
+      assert.deepEqual(mediums.at(-1).args, ['second', 'third']);
     });
 
     it('should throw once degraded', async () => {
@@ -344,54 +333,8 @@ describe('Distributor', () => {
       assert.doesNotThrow(again);
       assert.equal(distributor.terminated, true);
     });
-  });
 
-  describe('.destroy()', () => {
-    it('should error every live copy at once', () => {
-      // TODO
-    });
-
-    it('should be idempotent and answer one promise', () => {
-      // TODO
-    });
-
-    describe('>promise', () => {
-      it('should settle after the source is cancelled', () => {
-        // TODO
-      });
-
-      it('should find the store sealed and released', () => {
-        // TODO
-      });
-
-      it('should not wait for a reader to close', () => {
-        // TODO
-      });
-    });
-  });
-
-  describe('#fork', () => {
-    it('should dispatch once per fork', () => {
-      // TODO
-    });
-  });
-
-  describe('#degrade', () => {
-    it('should dispatch on the pull that crossed the limit', () => {
-      // TODO
-    });
-
-    it('should dispatch with degraded already true', () => {
-      // TODO
-    });
-
-    it('should not dispatch again on later pulls', () => {
-      // TODO
-    });
-  });
-
-  describe('#terminate', () => {
-    it('should dispatch once, on the first terminate()', () => {
+    it('should dispatch the terminate event once', () => {
       const distributor = new TestDistributor(makeSource());
       const types = [];
       const onTerminate = (event) => types.push(event.type);
@@ -405,17 +348,82 @@ describe('Distributor', () => {
     });
   });
 
-  describe('#warn', () => {
-    it('should carry dump-failed when the medium refuses the taking over', () => {
-      // TODO
+  describe('.destroy()', () => {
+    it('should error every live copy at once', async () => {
+      const distributor = new TestDistributor(makeSource(['a', 'b']));
+      const copies = [distributor.fork(), distributor.fork()];
+
+      distributor.destroy();
+
+      const aborted = copies.map((copy) =>
+        assert.rejects(drain(copy), EXPECTED.ABORTED),
+      );
+
+      await Promise.all(aborted);
     });
 
-    it('should carry source-cancel-failed when the source refuses', () => {
-      // TODO
+    it('should be idempotent and answer one promise', async () => {
+      const distributor = new TestDistributor(makeSource());
+
+      const first = distributor.destroy();
+      const second = distributor.destroy();
+
+      assert.equal(first, second);
+      assert.equal(await first, undefined);
     });
 
-    it('should carry backlog with the pending byte length', () => {
-      // TODO
+    describe('>promise', () => {
+      it('should settle after the source is cancelled', async () => {
+        let reason = null;
+        const source = new ReadableStream({
+          cancel(cause) {
+            reason = cause;
+          },
+        });
+        const distributor = new TestDistributor(source);
+
+        await distributor.destroy();
+
+        assert.equal(reason.name, EXPECTED.ABORTED.name);
+        assert.match(reason.message, EXPECTED.ABORTED.message);
+      });
+
+      it('should find the store sealed and released', async () => {
+        mediums.length = 0;
+
+        const distributor = new TestDistributor(makeSource(['a']));
+        const reader = distributor.fork().getReader();
+
+        Options.Tune.MaxStashByteLength(distributor, 0);
+        await reader.read();
+
+        const medium = mediums.at(-1);
+
+        await distributor.destroy();
+
+        assert.equal(medium.done, true);
+        assert.equal(medium.dropped, true);
+      });
+
+      it('should not wait for a reader to close', async () => {
+        HangingDegradedChunkReader.closed.length = 0;
+
+        const distributor = new HangingDistributor(makeSource(['a']));
+        const reader = distributor.fork().getReader();
+        const reading = reader.read();
+
+        Options.Tune.MaxStashByteLength(distributor, 0);
+
+        await settle();
+        await distributor.destroy();
+
+        assert.equal(HangingDegradedChunkReader.closed.length, 1);
+        await assert.rejects(reading, EXPECTED.ABORTED);
+      });
+
+      it('should dispatch warn(source-cancel-failed) when it refuses', () => {
+        // TODO
+      });
     });
   });
 });

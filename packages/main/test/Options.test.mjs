@@ -1,15 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  Distributor,
-  DegradedChunkReader,
-  Options,
-  SYMBOL,
-} from '../src/index.mjs';
+import { Options } from '../src/index.mjs';
+
+import { drain, makeDistributor, settle } from './baseline.mjs';
 
 const { Tune, Get } = Options;
-const { DEGRADED_CHUNK_READER_CTOR } = SYMBOL.DISTRIBUTOR._S;
 
 const GIB = (1 << 10) ** 3;
 const LIMIT = Number.MAX_SAFE_INTEGER;
@@ -36,46 +32,6 @@ const EXPECTED = {
     message: /Cannot convert a Symbol value to a number/,
   },
 };
-
-class TestDegradedChunkReader extends DegradedChunkReader {}
-
-class TestDistributor extends Distributor {
-  static [DEGRADED_CHUNK_READER_CTOR] = TestDegradedChunkReader;
-}
-
-function makeSource(chunks = []) {
-  let pulled = 0;
-
-  return new ReadableStream({
-    pull(controller) {
-      if (pulled < chunks.length) {
-        controller.enqueue(Buffer.from(chunks[pulled]));
-        pulled++;
-      } else {
-        controller.close();
-      }
-    },
-  });
-}
-
-const makeDistributor = (chunks = []) =>
-  new TestDistributor(makeSource(chunks));
-
-const settle = async (turns = 6) => {
-  for (let i = 0; i < turns; i++) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-};
-
-async function drain(stream) {
-  const got = [];
-
-  for await (const chunk of stream) {
-    got.push(chunk.toString());
-  }
-
-  return got;
-}
 
 function countGetterReads(distributor, tune, value) {
   let reads = 0;
