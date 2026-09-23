@@ -98,6 +98,47 @@ describe('Transferrer', () => {
       assert.equal(medium.pendingByteLength, 0);
     });
 
+    it('should keep the chunks a failed dump left undrained', async () => {
+      const cause = new Error('the medium failed');
+      let refuseDump = null;
+      let writes = 0;
+
+      class RefusingDumpTransferrer extends TestTransferrer {
+        [HOST.DUMP]() {
+          return new Promise((resolve, reject) => {
+            refuseDump = () => reject(cause);
+          });
+        }
+
+        async [HOST.WRITE](buffer) {
+          writes += 1;
+
+          return super[HOST.WRITE](buffer);
+        }
+      }
+
+      const family = makeFamily({ medium: RefusingDumpTransferrer });
+      const distributor = new family.Distributor(makeSource(['a', 'b', 'c']));
+      const reading = distributor.fork().getReader();
+
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await reading.read();
+      await reading.read();
+
+      const medium = family.created.at(-1);
+
+      refuseDump();
+      await settle();
+
+      assert.equal(medium.error, cause);
+      assert.equal(writes, 0);
+      assert.equal(medium.pendingByteLength, 1);
+
+      await assert.rejects(reading.read(), cause);
+      assert.equal(writes, 0);
+    });
+
     it('should answer zero once the store is released', async () => {
       class HangingWriteTransferrer extends TestTransferrer {
         [HOST.WRITE]() {

@@ -52,8 +52,9 @@ class AbstractTransferrer {
       await this[I.DUMPING].catch(noop);
     }
 
-    // TODO: no case reaches this — $I.WRITE throws before a new drain can
-    //   start once an error is stored.
+    // A drain started while the dump was still in flight wakes up here on a
+    //   failed dump — $I.WRITE guards only the drains started after it. The
+    //   chunks already queued stay put, for the queue still serves them.
     if (this[I.ERROR] !== null) {
       return;
     }

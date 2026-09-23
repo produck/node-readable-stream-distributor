@@ -31,8 +31,11 @@ export default class SourceConsumptionAgent {
       await this.pulling;
     }
 
-    // TODO: no case reaches this — it needs a second copy to enter while the
-    //   source is finished and a pull is still in flight.
+    // Tail of the guarantee above: a pull still in flight belongs to another
+    //   copy, so the store is not settled yet. No driving pattern reaches it
+    //   (six of them, 14k ensure calls, see DEV.md); nothing outside rules it
+    //   out, so the wait stays.
+    /* c8 ignore next 3 */
     if (sourceReader.finished && this.pulling !== null) {
       await this.pulling;
     }
