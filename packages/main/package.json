@@ -10,7 +10,10 @@
   },
   "description": "Distribute a single Node.js ReadableStream to multiple independent consumers, each receiving a complete copy with isolated progress.",
   "exports": {
-    ".": "./src/index.mjs"
+    ".": {
+      "import": "./src/index.mjs",
+      "types": "./src/index.d.ts"
+    }
   },
   "homepage": "https://github.com/produck/node-readable-stream-distributor/tree/main/packages/main#readme",
   "imports": {
