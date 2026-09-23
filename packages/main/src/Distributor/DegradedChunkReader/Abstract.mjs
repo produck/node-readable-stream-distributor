@@ -58,6 +58,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   [_A.READER.$I.CLOSE]() {
+    // TODO: no case reaches this — destroy() closes each copy once.
     if (this[I.CLOSED]) {
       return;
     }
@@ -84,6 +85,8 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   async [I.READ_BACK]() {
     await this[I.INITIALIZED];
 
+    // TODO: no case reaches this — $I.WAIT_POSITION throws the same stored
+    //   error first whenever PEEK would have missed.
     if (this[I.ERROR] !== null) {
       throw this[I.ERROR];
     }

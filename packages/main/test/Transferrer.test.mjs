@@ -222,7 +222,7 @@ describe('Transferrer', () => {
       }
 
       const family = makeFamily({ medium: FailingTransferrer });
-      const distributor = new family.Distributor(makeSource(['a', 'b']));
+      const distributor = new family.Distributor(makeSource(['a', 'b', 'c']));
       const reading = distributor.fork().getReader();
 
       Options.Tune.MaxStashByteLength(distributor, 0);
@@ -230,6 +230,10 @@ describe('Transferrer', () => {
       await reading.read();
 
       const medium = family.created.at(-1);
+
+      await reading.read().catch(() => {});
+
+      assert.equal(medium.error, cause);
 
       await reading.read().catch(() => {});
 
@@ -274,6 +278,28 @@ describe('Transferrer', () => {
       const medium = family.created.at(-1);
 
       assert.equal(medium.dropped, false);
+
+      await distributor.destroy();
+
+      assert.equal(medium.dropped, true);
+    });
+
+    it('should swallow a failure of the release', async () => {
+      class RefusingDropTransferrer extends TestTransferrer {
+        async [HOST.DROP]() {
+          throw new Error('the medium refuses to release');
+        }
+      }
+
+      const family = makeFamily({ medium: RefusingDropTransferrer });
+      const distributor = new family.Distributor(makeSource(['a']));
+      const forked = distributor.fork();
+
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await forked.getReader().read();
+
+      const medium = family.created.at(-1);
 
       await distributor.destroy();
 

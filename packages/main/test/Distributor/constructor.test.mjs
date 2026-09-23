@@ -32,6 +32,27 @@ describe('constructor()', () => {
     reader.releaseLock();
   });
 
+  it('should accept a stream-like object', () => {
+    const like = {
+      [Symbol.toStringTag]: 'ReadableStream',
+      locked: false,
+      getReader() {},
+    };
+
+    assert.doesNotThrow(() => new TestDistributor(like));
+  });
+
+  it('should reject a stream-like object missing a member', () => {
+    const cases = [
+      { [Symbol.toStringTag]: 'ReadableStream', getReader() {} },
+      { [Symbol.toStringTag]: 'ReadableStream', locked: false },
+    ];
+
+    for (const like of cases) {
+      assert.throws(() => new TestDistributor(like), EXPECTED.NOT_A_STREAM);
+    }
+  });
+
   describe('>instance', () => {
     it('should start in the memory phase', () => {
       const distributor = new TestDistributor(makeSource());

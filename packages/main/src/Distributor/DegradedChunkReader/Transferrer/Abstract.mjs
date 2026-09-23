@@ -21,12 +21,6 @@ class AbstractTransferrer {
   [I.DONE] = false;
   [I.DROPPED] = false;
 
-  [I.ASSERT_NOT_DROPPED]() {
-    if (this[I.DROPPED]) {
-      Ow.Error.Common('Transferrer has been dropped');
-    }
-  }
-
   [I.SETTLE]() {
     const waitingPositions = this[I.WAITING_POSITION_TABLE];
 
@@ -58,6 +52,8 @@ class AbstractTransferrer {
       await this[I.DUMPING].catch(noop);
     }
 
+    // TODO: no case reaches this — $I.WRITE throws before a new drain can
+    //   start once an error is stored.
     if (this[I.ERROR] !== null) {
       return;
     }
@@ -101,8 +97,6 @@ class AbstractTransferrer {
   }
 
   [$I.WRITE](chunk) {
-    this[I.ASSERT_NOT_DROPPED]();
-
     if (this[I.ERROR] !== null) {
       Ow.throw(this[I.ERROR]);
     }
@@ -117,8 +111,6 @@ class AbstractTransferrer {
   }
 
   async [$I.WAIT_POSITION](position) {
-    this[I.ASSERT_NOT_DROPPED]();
-
     const { promise, resolve: release } = Promise.withResolvers();
 
     this[I.WAITING_POSITION_TABLE].set(release, position);
@@ -132,8 +124,6 @@ class AbstractTransferrer {
   }
 
   [$I.PEEK](position) {
-    this[I.ASSERT_NOT_DROPPED]();
-
     return this[I.PENDING_CHUNKS][position - this[A.I.WRITTEN_COUNT]];
   }
 
@@ -143,11 +133,12 @@ class AbstractTransferrer {
   }
 
   [$I.DROP]() {
-    this[I.ASSERT_NOT_DROPPED]();
     this[I.DROPPED] = true;
     this[I.PENDING_CHUNKS] = [];
     this[I.PENDING_BYTE_LENGTH] = 0;
 
+    // TODO: a synchronous throw from _I.DROP escapes this call and rejects
+    //   destroy(); call it inside the promise so only the result is caught.
     Promise.resolve(this[_I.DROP]()).catch(noop);
   }
 

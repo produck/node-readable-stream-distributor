@@ -305,6 +305,8 @@
   `(false, cause, false)` 源错 · `(false, null, true)` 我们收摊。
   对“源还能不能拉”这一个问题，对外只给一个读口：`finished`
   （`done || cancelled`）——消费代理的 `ensure()` 只认它。
+- **`get error` / `get reading` 已删（2026-09-23）**：两个读口全仓零引用。
+  位本身保留——`error` 参与上面三格判定，`reading` 用于 `read()` 去重。
 - `cancel(reason)`：幂等（已置位即返回）；**先置位再转交**平台
   `reader.cancel(reason)`；上游 cancel 回调失败时异常原样抛给调用者
   （规范保证流仍关闭）。**不释放锁**：它只表示我们不要这个源了，
@@ -317,12 +319,17 @@
 
 ### ChunkStash（共享内存暂存）
 
-- 公开只读：`dropped` / `done` / `length` / `byteLength`；`get(index)` 与
-  `chunks()` 带**放开**守卫（`ASSERT_NOT_DROPPED`）。
+- 公开只读：`done` / `length` / `byteLength`；`get(index)` 与 `chunks()`。
 - 写面受保护：`$I.PUSH(chunk)` / `$I.SET_DONE()` / `$I.DROP()` 只在包内使用。
   交接之后源侧不会再往 stash 写：相位翻转（写侧落位）本身就是那条保证。
-- `done` = 这一层存储自己的内容终态（由落点交接而来）；`dropped` = 放开载体。
-  二者是私有 `I` 成员，只经上面三个动作与 `get done` 进出。
+- `done` = 这一层存储自己的内容终态（由落点交接而来）。它是私有 `I` 成员，
+  只经上面三个动作与 `get done` 进出。
+- **放开守卫与 `dropped` 读口已删（2026-09-23）**：放开状态只服务守卫，
+  而守卫不必要——`$I.DROP` 的两个触发点（dump 成功、destroy 收场）都在
+  该相位结束之后，此后没有任何路径再触碰 stash。`I.DROPPED` 随之退场
+  （它只被守卫读）。
+  代价：将来若误用，症状从抛 `ChunkStash has been dropped` 变成静默
+  ——写进没人看的数组、`get(index)` 得 `undefined`。
 - **`sealed` 已删（2026-09-20）**：它原本把"触达前沿"与"真 `done`"分开
   （`index >= length` 且已封口才算完），09-13 起那份判据归 `ensure()` 的
   就绪契约与位置门；剩下的"整份 dump 前的写面冻结"由**相位翻转**与
@@ -496,9 +503,11 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
     我不再持有）、并调抽象 `_I.DROP()` 放开介质。**只由 `destroy()`
     触发**：没有活跃 fork 但未 `terminate()` 的分发器仍能 fork（只是进度
     落后而已），所以“何时完全放开”归宿主——没人要了不等于不能再用。
-    与 stash 两处同规：**二次调用抛**（`I.ASSERT_NOT_DROPPED` →
-    `Transferrer has been dropped`，不是幂等）、**放开即断访问**
-    （`$I.WRITE` / `$I.PEEK` / `$I.WAIT_POSITION` 都先断言）。一处不同：介质
+    **放开的判据只有一位**（2026-09-23 撤守卫）：`$I.DROP` 可重入，
+    `$I.WRITE` / `$I.PEEK` / `$I.WAIT_POSITION` 不再断言——调用面不出包
+    （`SYMBOL.TRANSFERRER` 只开 `_I` / `_S`），包内四个入口又都在
+    `$I.DROP` 之前的时序里。与 stash 共有的只剩放开载荷（`PENDING_CHUNKS`
+    置空 → drain 靠队列空收手）。一处不同：介质
     那半是**发起式**——不 `await` `_I.DROP()`（返回值仅用来吞掉拒绝），
     也不等 drain 收尾（死盘会让 `dumping` 永不落地，而 destroy 不许被拖
     住）；stash 那半是完成式（同步清干净）。它也**不**替分发器封口：

@@ -19,6 +19,8 @@ export default class ForkedReadableStream extends ReadableStream {
     };
 
     const pull = async (controller) => {
+      // TODO: no case reaches this — a closed or cancelled stream is not
+      //   pulled again.
       if (this[$I.CANCELLED] || this[I.DONE]) {
         return;
       }
@@ -41,6 +43,8 @@ export default class ForkedReadableStream extends ReadableStream {
     };
 
     const cancel = () => {
+      // TODO: no case reaches this — the platform does not call the source
+      //   cancel twice.
       if (this[$I.CANCELLED]) {
         return;
       }

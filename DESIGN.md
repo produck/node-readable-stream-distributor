@@ -148,7 +148,6 @@ classDiagram
     class ChunkStash {
         +length
         +byteLength
-        +dropped
         +done
         +get(index)
         +chunks()
@@ -156,7 +155,6 @@ classDiagram
 
     class SourceReader {
         +done
-        +error
         +cancelled
         +finished
         +read()

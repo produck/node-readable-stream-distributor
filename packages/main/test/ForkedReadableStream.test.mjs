@@ -123,6 +123,33 @@ describe('ForkedReadableStream', () => {
         await assert.rejects(reader.read(), cause);
       });
 
+      it('should reject a malformed answer from the medium', async () => {
+        const cases = [null, { done: 'yes' }, { done: false }];
+
+        for (const each of cases) {
+          let calls = 0;
+
+          class MalformedReader extends TestDegradedChunkReader {
+            [READER.READ]() {
+              if (calls++ === 0) {
+                return super[READER.READ]();
+              }
+
+              return each;
+            }
+          }
+
+          const family = makeFamily({ reader: MalformedReader });
+          const distributor = new family.Distributor(makeSource(['a', 'b']));
+          const reading = distributor.fork().getReader();
+
+          Options.Tune.MaxStashByteLength(distributor, 0);
+
+          await reading.read();
+          await assert.rejects(reading.read(), { name: 'TypeError' });
+        }
+      });
+
       it('should not lose data for a lagging copy', async () => {
         const distributor = new TestDistributor(makeSource(['a', 'b', 'c']));
         const leading = distributor.fork();

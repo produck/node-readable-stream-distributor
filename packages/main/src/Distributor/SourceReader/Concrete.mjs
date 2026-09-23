@@ -22,16 +22,8 @@ export default class SourceReader {
     return this[I.DONE];
   }
 
-  get error() {
-    return this[I.ERROR];
-  }
-
   get cancelled() {
     return this[I.CANCELLED];
-  }
-
-  get reading() {
-    return this[I.READING];
   }
 
   get finished() {
@@ -39,6 +31,7 @@ export default class SourceReader {
   }
 
   async [I.READ]() {
+    // TODO: no case reaches this — ensure() stops pulling once cancelled.
     if (this[I.CANCELLED]) {
       return { done: true, value: undefined };
     }
@@ -67,6 +60,7 @@ export default class SourceReader {
   }
 
   async cancel(reason) {
+    // TODO: no case reaches this — destroy() cancels the source once.
     if (this[I.CANCELLED]) {
       return;
     }

@@ -31,6 +31,8 @@ export default class SourceConsumptionAgent {
       await this.pulling;
     }
 
+    // TODO: no case reaches this — it needs a second copy to enter while the
+    //   source is finished and a pull is still in flight.
     if (sourceReader.finished && this.pulling !== null) {
       await this.pulling;
     }
