@@ -347,6 +347,33 @@ describe('Transferrer', () => {
       assert.equal(medium.dropped, true);
     });
 
+    it('should swallow a synchronous failure of the release', async () => {
+      let calls = 0;
+
+      class ThrowingDropTransferrer extends TestTransferrer {
+        [HOST.DROP]() {
+          calls += 1;
+
+          throw new Error('the medium refuses to release');
+        }
+      }
+
+      const family = makeFamily({ medium: ThrowingDropTransferrer });
+      const distributor = new family.Distributor(makeSource(['a']));
+      const forked = distributor.fork();
+
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await forked.getReader().read();
+
+      const medium = family.created.at(-1);
+
+      await assert.doesNotReject(distributor.destroy());
+
+      assert.equal(calls, 1);
+      assert.equal(medium.dropped, true);
+    });
+
     it('should not wait for the medium to release its own resources', async () => {
       class HangingDropTransferrer extends TestTransferrer {
         [HOST.DROP]() {

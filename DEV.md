@@ -275,7 +275,8 @@
   发生在流侧，`Get` 回的是宿主给的原值。
 - **读取时机逐项不同**，写在 `Items.mjs` 每项的头一行注释里（每趟 pull /
   每笔写 / 每个 fork 构造一次）。这条不是风格：`Tune` 之后"为什么不生效"
-  只能靠它回答（`ForkHighWaterMark` 只管之后新建的拷贝）。
+  只能靠它回答（`ForkHighWaterMark` 只管之后新建的拷贝）。刻度出处：
+  `logs/measure-options.mjs` / `logs/measure-options2.mjs`。
 
 ### SourceConsumptionAgent（消费代理）
 
@@ -553,7 +554,13 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
     置空 → drain 靠队列空收手）。一处不同：介质
     那半是**发起式**——不 `await` `_I.DROP()`（返回值仅用来吞掉拒绝），
     也不等 drain 收尾（死盘会让 `dumping` 永不落地，而 destroy 不许被拖
-    住）；stash 那半是完成式（同步清干净）。它也**不**替分发器封口：
+    住）；**同步抛也一并吞掉**（2026-09-23 修）：调用经一个 promise 转手，
+    否则同步抛会漏到 `destroy()` 的返回值上，fire-and-forget 的宿主还会吃
+    到未处理拒绝（Node 默认终止进程）——实测 `logs/probe-drop-throw.mjs`
+    三档（同步返回 / 同步抛 / 异步抛）。转手走 `ignoreRejection(thunk)`：
+    它**只收 thunk**，箭头挪进函数体是 prettier 的成员链规则逼的（3 段
+    链带函数实参必拆行），换回 `then(() => …)` 就会变三行；stash 那半是
+    完成式（同步清干净）。它也**不**替分发器封口：
     `SET_DONE()` 由 `destroy()` 先调，拿到的是“先定长后放开”。
 - **放开后的写侧收手**：drain 不需要额外的标志位——队列被置空，下一圈
   自然退出（在途那一笔照旧落介质，落不回来的不管）。`I.FAIL` 改为**首次
@@ -562,6 +569,25 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
 - 串行链 `I.DRAIN` 单飞：先等 `I.DUMPING` 落地（不然会把接管的这 L 条
   再写一遍），再按 FIFO 一块一块写队列，写一块推一格水位。于是
   "活块永远排在 dump 之后"天然成立。
+  - **错误闸只在循环前，且不是死代码（2026-09-23 实测）**：排空可能起于
+    dump 在途时（读在 dump 期间照常发生），它一进门就挂在首句的
+    `await this[I.DUMPING]` 上；dump 随后失败 → `I.FAIL` 置 `ERROR` →
+    排空恢复时撞上这道闸，队列原样留下（`$I.WRITE` 只挡错误**之后**起的
+    排空，挡不住这一趟）。实测 `logs/probe-drain-guard.mjs`：这一支宿主
+    `_I.WRITE` 调用数 0、`pendingByteLength` 不清零，对照支排空跑完
+    （写 2 笔、队列归零）。
+  - **单飞位在唯一出口复位（2026-09-23）**：闸后的早退曾跳过末尾的
+    `I.DRAINING = null`，把一个已落定的 promise 留在“正在排”的位置上。
+    今天无观测面（`$I.WRITE` 见错即抛，起不了新排空），但那是颗雷：把闸
+    改成 `if (ERROR === null) { while … }` 之后，单飞位在唯一出口复位。
+  - **首句等的是 promise，不是 thunk（2026-09-23）**：
+    `await this[I.DUMPING].catch(noop)` 里，等待与吞拒绝都发生在 dump
+    那笔 promise 自身上。**别把它交给 `ignoreRejection()`**：`then()`
+    的参数位要函数，传 promise 会被按恒等处理——等待立刻返回、也没挂上
+    handler，闸于是在错误置位前被检查，失败 dump 留下的队列会被写掉。
+    `should keep the chunks a failed dump left undrained` 就是这条的哨兵
+    （写错时宿主 `_I.WRITE` 2 笔、期望 0），`logs/probe-drain-guard.mjs`
+    的 P1 支同理。
 - 读侧原语（受保护）：`$I.WAIT_POSITION(position)` = 等到该位**已被接受**
   （`position < 水位 + 队列`）或**永远不会有块**（done）。拒绝只落在
   **永不会有块**那一位：`I.ERROR` 是**介质域**的否决，已被接受的位照发
@@ -596,7 +622,8 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
   把判据落成两处、并把 `I.ERROR` 检查搬进命中路径，不划算，故保持
   "判据只写一处"。终局也不单列分支：放行写成单循环
   `position < 水位 + 队列 || isTerminal`，一处 `delete` + `resolve`，
-  让"放行点只有一处"一眼可见。`I.SETTLE` 首行空表早返回。
+  让"放行点只有一处"一眼可见。`I.SETTLE` 首行空表早返回。刻度出处：
+  `logs/probe-wait-cost.mjs`。
 - **纯内部对象**：实例由分发器私有持有，**不开观察面**——要看就进
   调试器按符号表读成员（`I.PENDING_CHUNKS` / `I.PENDING_BYTE_LENGTH` /
   `I.WRITTEN_CHUNK_COUNT` / `I.WAITING_POSITION_TABLE` / `I.DRAINING` /

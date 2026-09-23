@@ -6,6 +6,10 @@ import { _A } from './_External.mjs';
 
 const noop = () => {};
 
+function ignoreRejection(thunk) {
+  return Promise.resolve().then(thunk).catch(noop);
+}
+
 class AbstractTransferrer {
   static [_S.PARSE_ARGUMENTS](args) {
     return args;
@@ -55,22 +59,20 @@ class AbstractTransferrer {
     // A drain started while the dump was still in flight wakes up here on a
     //   failed dump — $I.WRITE guards only the drains started after it. The
     //   chunks already queued stay put, for the queue still serves them.
-    if (this[I.ERROR] !== null) {
-      return;
-    }
+    if (this[I.ERROR] === null) {
+      while (this[I.PENDING_CHUNKS].length > 0) {
+        const buffer = this[I.PENDING_CHUNKS][0];
 
-    while (this[I.PENDING_CHUNKS].length > 0) {
-      const buffer = this[I.PENDING_CHUNKS][0];
+        await this[_I.WRITE](buffer).catch((cause) => this[I.FAIL](cause));
 
-      await this[_I.WRITE](buffer).catch((cause) => this[I.FAIL](cause));
+        if (this[I.ERROR] !== null) {
+          break;
+        }
 
-      if (this[I.ERROR] !== null) {
-        break;
+        this[I.PENDING_CHUNKS].shift();
+        this[I.PENDING_BYTE_LENGTH] -= buffer.byteLength;
+        this[A.I.WRITTEN_COUNT] += 1;
       }
-
-      this[I.PENDING_CHUNKS].shift();
-      this[I.PENDING_BYTE_LENGTH] -= buffer.byteLength;
-      this[A.I.WRITTEN_COUNT] += 1;
     }
 
     this[I.DRAINING] = null;
@@ -137,10 +139,7 @@ class AbstractTransferrer {
     this[I.DROPPED] = true;
     this[I.PENDING_CHUNKS] = [];
     this[I.PENDING_BYTE_LENGTH] = 0;
-
-    // TODO: a synchronous throw from _I.DROP escapes this call and rejects
-    //   destroy(); call it inside the promise so only the result is caught.
-    Promise.resolve(this[_I.DROP]()).catch(noop);
+    ignoreRejection(() => this[_I.DROP]());
   }
 
   get dumping() {
