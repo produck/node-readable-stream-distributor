@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 
-import { Options } from '../../../src/index.mjs';
+import { Options } from '@produck/readable-stream-distributor';
 
-import { makeSource, TestDistributor } from '../../baseline.mjs';
+import { makeSource, TestDistributor } from '#test/baseline.mjs';
 
 it('should be false while the stash holds the data', () => {
   // TODO

@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 
-import { Options, SYMBOL } from '../../../src/index.mjs';
+import { Options, SYMBOL } from '@produck/readable-stream-distributor';
 
 import {
   makeFamily,
   makeSource,
   settle,
   TestTransferrer,
-} from '../../baseline.mjs';
+} from '#test/baseline.mjs';
 
 const { _I: TRANSFERRER } = SYMBOL.TRANSFERRER;
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { Options, SYMBOL } from '../../../src/index.mjs';
+import { Options, SYMBOL } from '@produck/readable-stream-distributor';
 
 import {
   makeFamily,
@@ -9,7 +9,7 @@ import {
   settle,
   TestDegradedChunkReader,
   TestDistributor,
-} from '../../baseline.mjs';
+} from '#test/baseline.mjs';
 
 const { _I: READER } = SYMBOL.DEGRADED_CHUNK_READER;
 

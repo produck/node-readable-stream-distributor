@@ -23,3 +23,14 @@ Deltas against `.github/instructions/produck/10-produck-node.instructions.md`.
 
 - The package `test` script is `node test/index.mjs`, without `--test`.
 - Test-side deltas live in the 12 override in this folder.
+
+## Test imports
+
+- Source is reached by the package name itself
+  (`@produck/readable-stream-distributor`), not by a path or an alias. Node
+  resolves it inside the package through `exports`, so a test walks the same
+  surface a consumer walks and fails as soon as `exports` stops answering.
+- `packages/main/package.json` declares an `imports` map with `#test/*` only,
+  for the test tree; no test file counts `../` segments to reach a fixture.
+- Both serve the test side only: `src/` keeps relative imports, so the
+  published package and its internal wiring are untouched.

@@ -3,7 +3,7 @@ import {
   DegradedChunkReader,
   SYMBOL,
   Transferrer,
-} from '../src/index.mjs';
+} from '@produck/readable-stream-distributor';
 
 const { DEGRADED_CHUNK_READER_CTOR } = SYMBOL.DISTRIBUTOR._S;
 const { _I: READER, _S: READER_S } = SYMBOL.DEGRADED_CHUNK_READER;

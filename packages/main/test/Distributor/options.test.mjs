@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { Options } from '../../src/index.mjs';
+import { Options } from '@produck/readable-stream-distributor';
 
-import { makeSource, TestDistributor } from '../baseline.mjs';
+import { makeSource, TestDistributor } from '#test/baseline.mjs';
 
 describe('.options', () => {
   it('should answer every item of the config surface', () => {

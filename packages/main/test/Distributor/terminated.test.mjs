@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { makeSource, TestDistributor } from '../baseline.mjs';
+import { makeSource, TestDistributor } from '#test/baseline.mjs';
 
 describe('.terminated', () => {
   it('should be false by default', () => {

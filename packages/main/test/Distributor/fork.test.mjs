@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { Distributor, Options } from '../../src/index.mjs';
+import { Distributor, Options } from '@produck/readable-stream-distributor';
 
-import { drain, makeSource, TestDistributor } from '../baseline.mjs';
+import { drain, makeSource, TestDistributor } from '#test/baseline.mjs';
 
 const EXPECTED = {
   NOT_A_STRING: {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { drain, makeSource, TestDistributor } from '../../baseline.mjs';
+import { drain, makeSource, TestDistributor } from '#test/baseline.mjs';
 
 const EXPECTED = {
   ABORTED: {

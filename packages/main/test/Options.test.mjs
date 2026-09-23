@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { Options } from '../src/index.mjs';
+import { Options } from '@produck/readable-stream-distributor';
 
-import { drain, makeDistributor, settle } from './baseline.mjs';
+import { drain, makeDistributor, settle } from '#test/baseline.mjs';
 
 const { Tune, Get } = Options;
 

@@ -47,6 +47,7 @@ Deltas against `.github/instructions/produck/12-produck-test.instructions.md`.
 - It has no `.test.` suffix and is not imported by `test/index.mjs`. The
   baseline requires `.test.mjs` for test files and a single entrypoint, so this
   is the only safe place for a helper.
+- Test files reach it as `#test/baseline.mjs`, never by a relative path.
 - Domain-specific expectation objects (error texts) and domain-specific
   fixtures stay in their own `.test.mjs`.
 

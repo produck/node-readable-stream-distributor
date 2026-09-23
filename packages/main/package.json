@@ -13,6 +13,9 @@
     ".": "./src/index.mjs"
   },
   "homepage": "https://github.com/produck/node-readable-stream-distributor/tree/main/packages/main#readme",
+  "imports": {
+    "#test/*": "./test/*"
+  },
   "keywords": [
     "readable-stream",
     "stream",
