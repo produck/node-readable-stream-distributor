@@ -5,17 +5,16 @@ import { Distributor, Options, SYMBOL } from '../src/index.mjs';
 
 import {
   drain,
+  makeFamily,
   makeSource,
-  mediums,
   settle,
   TestDegradedChunkReader,
   TestDistributor,
   TestTransferrer,
 } from './baseline.mjs';
 
-const { DEGRADED_CHUNK_READER_CTOR } = SYMBOL.DISTRIBUTOR._S;
-const { _I: READER, _S: READER_S } = SYMBOL.DEGRADED_CHUNK_READER;
-const { _S: TRANSFERRER_S } = SYMBOL.TRANSFERRER;
+const { _I: READER } = SYMBOL.DEGRADED_CHUNK_READER;
+const { _I: TRANSFERRER, _S: TRANSFERRER_S } = SYMBOL.TRANSFERRER;
 
 const EXPECTED = {
   NOT_A_STREAM: {
@@ -35,42 +34,6 @@ const EXPECTED = {
     message: /The distributor has been terminated/,
   },
 };
-
-class ParsingTransferrer extends TestTransferrer {
-  static parsed = [];
-
-  static [TRANSFERRER_S.PARSE_ARGUMENTS](args) {
-    ParsingTransferrer.parsed.push(args);
-
-    return args.map((arg) => `${arg}!`);
-  }
-}
-
-class ParsingDegradedChunkReader extends TestDegradedChunkReader {
-  static [READER_S.TRANSFERRER_CTOR] = ParsingTransferrer;
-}
-
-class ParsingDistributor extends Distributor {
-  static [DEGRADED_CHUNK_READER_CTOR] = ParsingDegradedChunkReader;
-}
-
-class HangingDegradedChunkReader extends TestDegradedChunkReader {
-  static closed = [];
-
-  [READER.READ]() {
-    return new Promise(() => {});
-  }
-
-  [READER.CLOSE]() {
-    HangingDegradedChunkReader.closed.push(this);
-
-    return new Promise(() => {});
-  }
-}
-
-class HangingDistributor extends Distributor {
-  static [DEGRADED_CHUNK_READER_CTOR] = HangingDegradedChunkReader;
-}
 
 describe('Distributor', () => {
   describe('constructor()', () => {
@@ -138,8 +101,18 @@ describe('Distributor', () => {
       assert.throws(attempt, EXPECTED.UNIMPLEMENTED);
     });
 
-    it('should work as well after a switch', () => {
-      // TODO
+    it('should work as well after a switch', async () => {
+      const distributor = new TestDistributor(makeSource(['a']));
+      const first = distributor.fork().getReader();
+
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await first.read();
+      assert.equal(distributor.degraded, true);
+
+      const second = distributor.fork();
+
+      assert.deepEqual(await drain(second), []);
     });
 
     it('should dispatch the fork event once', () => {
@@ -156,8 +129,20 @@ describe('Distributor', () => {
       // TODO
     });
 
-    it('should turn true at the limit even when the source is done', () => {
-      // TODO
+    it('should turn true at the limit even when the source is done', async () => {
+      const distributor = new TestDistributor(makeSource(['a']));
+      const reader = distributor.fork().getReader();
+
+      Options.Tune.DegradeOnStashFullAndDone(distributor, true);
+      Options.Tune.MaxStashByteLength(distributor, 1);
+
+      await reader.read();
+      assert.equal(distributor.degraded, false);
+
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await reader.read();
+      assert.equal(distributor.degraded, true);
     });
 
     it('should follow DegradeOnStashFullAndDone for a full, ended stash', () => {
@@ -180,8 +165,31 @@ describe('Distributor', () => {
       // TODO
     });
 
-    it('should dispatch warn(dump-failed) when the dump fails', () => {
-      // TODO
+    it('should dispatch warn(dump-failed) when the dump fails', async () => {
+      const refused = new Error('the medium refuses the dump');
+
+      class RefusingTransferrer extends TestTransferrer {
+        [TRANSFERRER.DUMP]() {
+          throw refused;
+        }
+      }
+
+      const family = makeFamily({ medium: RefusingTransferrer });
+      const distributor = new family.Distributor(makeSource(['a']));
+      const reader = distributor.fork().getReader();
+      const warns = [];
+      const onWarn = (event) => warns.push(event.detail);
+
+      distributor.addEventListener('warn', onWarn);
+      Options.Tune.MaxStashByteLength(distributor, 0);
+
+      await reader.read();
+      await settle();
+
+      assert.equal(warns.length, 1);
+      assert.equal(warns[0].code, 'dump-failed');
+      assert.match(warns[0].payload.message, /Failed to dump the ChunkStash/);
+      assert.equal(warns[0].payload.cause, refused);
     });
 
     it('should dispatch warn(backlog) once the backlog is over the limit', () => {
@@ -240,10 +248,18 @@ describe('Distributor', () => {
 
   describe('.setTransferrerArgs()', () => {
     it('should hand the whole argument array to PARSE_ARGUMENTS', async () => {
-      ParsingTransferrer.parsed.length = 0;
-      mediums.length = 0;
+      const parsed = [];
 
-      const distributor = new ParsingDistributor(makeSource(['a']));
+      class ParsingTransferrer extends TestTransferrer {}
+
+      ParsingTransferrer[TRANSFERRER_S.PARSE_ARGUMENTS] = (args) => {
+        parsed.push(args);
+
+        return args.map((arg) => `${arg}!`);
+      };
+
+      const family = makeFamily({ medium: ParsingTransferrer });
+      const distributor = new family.Distributor(makeSource(['a']));
       const reader = distributor.fork().getReader();
 
       distributor.setTransferrerArgs('x', 'y');
@@ -251,14 +267,13 @@ describe('Distributor', () => {
 
       await reader.read();
 
-      assert.deepEqual(ParsingTransferrer.parsed, [['x', 'y']]);
-      assert.deepEqual(mediums.at(-1).args, ['x!', 'y!']);
+      assert.deepEqual(parsed, [['x', 'y']]);
+      assert.deepEqual(family.created.at(-1).args, ['x!', 'y!']);
     });
 
     it('should pass the array through when the medium kept the default', async () => {
-      mediums.length = 0;
-
-      const distributor = new TestDistributor(makeSource(['a']));
+      const family = makeFamily();
+      const distributor = new family.Distributor(makeSource(['a']));
       const reader = distributor.fork().getReader();
 
       distributor.setTransferrerArgs('x', 'y');
@@ -266,25 +281,24 @@ describe('Distributor', () => {
 
       await reader.read();
 
-      assert.deepEqual(mediums.at(-1).args, ['x', 'y']);
+      assert.deepEqual(family.created.at(-1).args, ['x', 'y']);
     });
 
     it('should keep the arguments for the switch', async () => {
-      mediums.length = 0;
-
-      const distributor = new TestDistributor(makeSource(['a']));
+      const family = makeFamily();
+      const distributor = new family.Distributor(makeSource(['a']));
       const reader = distributor.fork().getReader();
 
       distributor.setTransferrerArgs('first');
       distributor.setTransferrerArgs('second', 'third');
 
-      assert.equal(mediums.length, 0);
+      assert.equal(family.created.length, 0);
 
       Options.Tune.MaxStashByteLength(distributor, 0);
 
       await reader.read();
 
-      assert.deepEqual(mediums.at(-1).args, ['second', 'third']);
+      assert.deepEqual(family.created.at(-1).args, ['second', 'third']);
     });
 
     it('should throw once degraded', async () => {
@@ -389,15 +403,14 @@ describe('Distributor', () => {
       });
 
       it('should find the store sealed and released', async () => {
-        mediums.length = 0;
-
-        const distributor = new TestDistributor(makeSource(['a']));
+        const family = makeFamily();
+        const distributor = new family.Distributor(makeSource(['a']));
         const reader = distributor.fork().getReader();
 
         Options.Tune.MaxStashByteLength(distributor, 0);
         await reader.read();
 
-        const medium = mediums.at(-1);
+        const medium = family.created.at(-1);
 
         await distributor.destroy();
 
@@ -406,9 +419,22 @@ describe('Distributor', () => {
       });
 
       it('should not wait for a reader to close', async () => {
-        HangingDegradedChunkReader.closed.length = 0;
+        const closed = [];
 
-        const distributor = new HangingDistributor(makeSource(['a']));
+        class HangingReader extends TestDegradedChunkReader {
+          [READER.READ]() {
+            return new Promise(() => {});
+          }
+
+          [READER.CLOSE]() {
+            closed.push(this);
+
+            return new Promise(() => {});
+          }
+        }
+
+        const family = makeFamily({ reader: HangingReader });
+        const distributor = new family.Distributor(makeSource(['a']));
         const reader = distributor.fork().getReader();
         const reading = reader.read();
 
@@ -417,12 +443,30 @@ describe('Distributor', () => {
         await settle();
         await distributor.destroy();
 
-        assert.equal(HangingDegradedChunkReader.closed.length, 1);
+        assert.equal(closed.length, 1);
         await assert.rejects(reading, EXPECTED.ABORTED);
       });
 
-      it('should dispatch warn(source-cancel-failed) when it refuses', () => {
-        // TODO
+      it('should dispatch warn(source-cancel-failed) when it refuses', async () => {
+        const cause = new Error('the source refuses to be cancelled');
+        const warns = [];
+        const onWarn = (event) => warns.push(event.detail);
+
+        const source = new ReadableStream({
+          cancel() {
+            throw cause;
+          },
+        });
+
+        const distributor = new TestDistributor(source);
+
+        distributor.addEventListener('warn', onWarn);
+
+        await distributor.destroy();
+
+        assert.equal(warns.length, 1);
+        assert.equal(warns[0].code, 'source-cancel-failed');
+        assert.equal(warns[0].payload, cause);
       });
     });
   });
