@@ -8,7 +8,12 @@ import {
   SYMBOL,
 } from '@produck/readable-stream-distributor';
 
-import { makeSource, TestDistributor } from '#test/baseline.mjs';
+import {
+  makeFamily,
+  makeSource,
+  TestDegradedChunkReader,
+  TestDistributor,
+} from '#test/baseline.mjs';
 
 const { DEGRADED_CHUNK_READER_CTOR } = SYMBOL.DISTRIBUTOR._S;
 const { _I: READER } = SYMBOL.DEGRADED_CHUNK_READER;
@@ -99,4 +104,31 @@ it('should stay false, rejecting the read, when the family is unfinished', async
 
   await assert.rejects(reader.read(), EXPECTED.UNIMPLEMENTED);
   assert.equal(distributor.degraded, false);
+});
+
+it('should reject the read that needs the medium when the medium refused to open', async () => {
+  const cause = new Error('the medium refused to open');
+  let reads = 0;
+
+  class RefusingOpenReader extends TestDegradedChunkReader {
+    [READER.INITIALIZE]() {
+      throw cause;
+    }
+
+    [READER.READ](...args) {
+      reads += 1;
+
+      return super[READER.READ](...args);
+    }
+  }
+
+  const family = makeFamily({ reader: RefusingOpenReader });
+  const distributor = new family.Distributor(makeSource(['a']));
+  const reader = distributor.fork().getReader();
+
+  Options.Tune.MaxStashByteLength(distributor, 0);
+
+  await assert.rejects(reader.read(), cause);
+  assert.equal(distributor.degraded, true);
+  assert.equal(reads, 0);
 });

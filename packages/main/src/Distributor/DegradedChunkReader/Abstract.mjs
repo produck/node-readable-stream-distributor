@@ -1,3 +1,4 @@
+import * as Ow from '@produck/ow';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as ChunkReader from '../ChunkReader/index.mjs';
@@ -87,10 +88,11 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   async [I.READ_BACK]() {
     await this[I.INITIALIZED];
 
-    // TODO: no case reaches this — $I.WAIT_POSITION throws the same stored
-    //   error first whenever PEEK would have missed.
+    // The initialize chain stores its failure instead of rejecting, so the
+    //   first read that needs the medium surfaces it here — a failed dump is
+    //   caught by $I.WAIT_POSITION first, carrying the raw cause.
     if (this[I.ERROR] !== null) {
-      throw this[I.ERROR];
+      Ow.throw(this[I.ERROR]);
     }
 
     await this[I.SYNC]();

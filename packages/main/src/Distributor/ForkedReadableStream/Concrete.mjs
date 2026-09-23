@@ -1,5 +1,6 @@
-import * as Options from '../Options/index.mjs';
+import * as Ow from '@produck/ow';
 
+import * as Options from '../Options/index.mjs';
 import { I, $I, A } from './_Symbol.mjs';
 import { DISTRIBUTOR, _A } from './_External.mjs';
 
@@ -14,18 +15,17 @@ export default class ForkedReadableStream extends ReadableStream {
       registry.prune(this);
     };
 
+    const start = (controller) => (_controller = controller);
+    const cancel = () => conclude();
+
     const read = async () => {
       try {
         return await this[A.I.READER][_A.READER.$I.ENSURE_THEN_READ]();
       } catch (cause) {
         conclude();
-
-        throw cause;
+        Ow.throw(cause);
       }
     };
-
-    const start = (controller) => (_controller = controller);
-    const cancel = () => conclude();
 
     const pull = async (controller) => {
       const result = await read();

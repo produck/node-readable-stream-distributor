@@ -39,7 +39,7 @@ export default class SourceReader {
         this[I.ERROR] = cause;
       }
 
-      throw cause;
+      Ow.throw(cause);
     });
 
     if (!this[I.CANCELLED]) {
