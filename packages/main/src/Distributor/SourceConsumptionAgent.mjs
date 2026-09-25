@@ -73,9 +73,6 @@ export default class SourceConsumptionAgent {
     const { distributor } = this;
     const stash = distributor[A.I.STASH];
 
-    // TODO: review both option reads below: they run a host-supplied getter
-    //   inside a pull, so a throw rejects the pulling copy and skips the
-    //   switch, leaving the phase in memory.
     if (stash.byteLength <= Options.Get.MaxStashByteLength(distributor)) {
       return;
     }
@@ -112,8 +109,6 @@ export default class SourceConsumptionAgent {
   observeBacklog() {
     const { distributor } = this;
     const transferrer = distributor[$I.TRANSFERRER];
-    // TODO: review the option read below: it runs a host-supplied getter
-    //   inside a pull, so a throw rejects the pull that just wrote a chunk.
     const warningLength = Options.Get.MaxBacklogWarningByteLength(distributor);
 
     if (transferrer.pendingByteLength > warningLength) {

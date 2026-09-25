@@ -7,8 +7,6 @@ import { DISTRIBUTOR, _A } from './_External.mjs';
 export default class ForkedReadableStream extends ReadableStream {
   constructor(distributor, bufferReader) {
     const registry = distributor[DISTRIBUTOR.A.$I.REGISTRY];
-    // TODO: review a host getter that throws here: fork() throws before the
-    //   stream exists, so nothing is registered and nothing is left behind.
     const highWaterMark = Options.Get.ForkHighWaterMark(distributor);
     let _controller;
 

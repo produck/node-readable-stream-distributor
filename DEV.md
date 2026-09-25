@@ -281,6 +281,14 @@
   作者。`HighWaterMark` 按规范口径：先 `ToNumber` 再判，`NaN`/负数抛
   `RangeError`，`Symbol`/`BigInt` 抛 ToNumber 中止的 `TypeError`；归一
   发生在流侧，`Get` 回的是宿主给的原值。
+- **宿主取值器抛异常一律放行（2026-09-25 定）**：这属于研发错误，下游工程师
+  必须保证它不抛。所以 `Tune` 的安装期求值、`Get` / `snapshot` /
+  `get options`，以及每个内部读取点（`ForkHighWaterMark` 在 `fork()` 构造
+  处、`degradeIfNeeded` 两项、`observeBacklog` 一项）都不加 `try`——五个
+  `TODO` 标记随之删掉。两处后果要知道：`fork()` 是**什么都没建**就抛（拷贝
+  未注册、`fork` 事件不派）；pull 里的读取点抛 = 那趟 pull 失败，异常照旧
+  到达读侧（拷贝的 read 拒绝），另外派一条 `warn('pull-failed')`——那是
+  “失败归代理报”的自然结果，不是拦截。
 - **读取时机逐项不同**，写在 `Items.mjs` 每项的头一行注释里（每趟 pull /
   每笔写 / 每个 fork 构造一次）。这条不是风格：`Tune` 之后"为什么不生效"
   只能靠它回答（`ForkHighWaterMark` 只管之后新建的拷贝）。刻度出处：
