@@ -9,9 +9,11 @@ import {
   settle,
   TestDegradedChunkReader,
   TestDistributor,
+  TestTransferrer,
 } from '#test/baseline.mjs';
 
 const { _I: READER } = SYMBOL.DEGRADED_CHUNK_READER;
+const { _I: TRANSFERRER } = SYMBOL.TRANSFERRER;
 
 const EXPECTED = {
   ABORTED: {
@@ -100,6 +102,85 @@ describe('>promise', () => {
 
     assert.equal(warns.length, 1);
     assert.equal(warns[0].code, 'source-cancel-failed');
+    assert.equal(warns[0].payload, cause);
+  });
+
+  it('should dispatch warn(pull-failed) for the in-flight pull', async () => {
+    const cause = new Error('the source read failed');
+    const warns = [];
+    let fail = null;
+    const source = {
+      [Symbol.toStringTag]: 'ReadableStream',
+      locked: false,
+      getReader() {
+        return {
+          read() {
+            return new Promise((_, reject) => {
+              fail = reject;
+            });
+          },
+          cancel() {
+            return Promise.resolve();
+          },
+        };
+      },
+    };
+    const distributor = new TestDistributor(source);
+    const aborted = distributor
+      .fork()
+      .getReader()
+      .read()
+      .catch((r) => r);
+
+    distributor.addEventListener('warn', (event) => warns.push(event.detail));
+
+    await settle();
+
+    const destroying = distributor.destroy();
+
+    await settle();
+    fail(cause);
+    await destroying;
+
+    assert.deepEqual(
+      warns.map((warn) => warn.code),
+      ['pull-failed'],
+    );
+    assert.equal(warns[0].payload, cause);
+
+    const failure = await aborted;
+
+    assert.equal(failure.name, EXPECTED.ABORTED.name);
+    assert.match(failure.message, EXPECTED.ABORTED.message);
+  });
+
+  it('should dispatch warn(drop-failed) when the release fails', async () => {
+    const cause = new Error('the medium refuses to release');
+
+    class RefusingDropTransferrer extends TestTransferrer {
+      [TRANSFERRER.DROP]() {
+        throw cause;
+      }
+    }
+
+    const family = makeFamily({ medium: RefusingDropTransferrer });
+    const distributor = new family.Distributor(makeSource(['a']));
+    const warns = [];
+
+    distributor.addEventListener('warn', (event) => warns.push(event.detail));
+
+    Options.Tune.MaxStashByteLength(distributor, 0);
+
+    await distributor.fork().getReader().read();
+    assert.equal(distributor.degraded, true);
+
+    await distributor.destroy();
+    await settle();
+
+    assert.deepEqual(
+      warns.map((warn) => warn.code),
+      ['drop-failed'],
+    );
     assert.equal(warns[0].payload, cause);
   });
 });

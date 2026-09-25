@@ -189,19 +189,21 @@
   - **同步段**（调用当场、不可逆、可辨识）：`terminate()` → 遍历注册表，
     **每个拷贝先关读器**（`$I.CLOSE`，两相同一句话）**再**
     `controller.error(终止原因)` + `prune`，不补已缓冲的前缀。
-  - **异步段**（Promise 落地时才完成）：`await SOURCE_READER.cancel(终止
-原因)`（失败只派 `warn('source-cancel-failed')`，不打断收摊）→ 等在途
-    那一笔落定 → **按此刻的相位收场**：两侧同形——`$I.SET_DONE()`（封口）
-    - `$I.DROP()`（放开载体）；内存相放开的是 stash 里的块，降级相放开的
-      是待写队列与介质句柄。所以只有“拷贝全被 error”是当场的，
-      **封口与放开都不在调用当场**。
+  - **异步段**（Promise 落地时才完成）：`await SOURCE_READER.cancel(终止原因)`
+    （失败只派 `warn('source-cancel-failed')`，不打断收摊）→
+    `await AGENT.pullingSettled`——**只取时机**，结果归代理侧（见消费代理一节）
+    → **按此刻的相位收场**：两侧同形——`$I.SET_DONE()`（封口）+ `$I.DROP()`
+    （放开载体）；内存相放开的是 stash 里的块，降级相放开的是待写队列与
+    介质句柄。所以只有“拷贝全被 error”是当场的，**封口与放开都不在调用
+    当场**。
 - **两个位置的陷阱**（都实测过）：
   - 等在途 pull **必须在 `cancel` 之后**：在途的 `read()` 只有 cancel 能
     解（源不再出声时它就一直挂着），放在前面 `destroy()` 直接死锁。
-  - 在途 pull 的拒绝**要吞掉**：源在 destroy 同一刻报错时，重新 await
-    到的是那个源错误；不吞则整个异步段中断——封口与释放都不发生，
-    `destroy()` 还返回一个拒绝的 Promise。该错误仍由读侧（拷贝的
-    `ensure`）收，分流与之前一致。
+  - 在途 pull 的**结果要吞掉**（2026-09-25 改）：销毁只关心时机，
+    `pullingSettled` 内部 `.catch(noop)`。不吞则整个异步段中断——封口与
+    释放都不发生，`destroy()` 还返回一个拒绝的 Promise。**报不在这里**：
+    那条 `warn('pull-failed')` 由代理的 `settlePulling()` 派（见消费代理
+    一节），读侧（拷贝的 `ensure`）照旧收，分流不变。
 - **相位只读一次**（在所有异步都结束之后）：`cancel` 一被调用
   `finished` 即为真，之后 `ensure` 不可能再起新的一趟 pull，而在途那一笔
   刚被等过——相位在收场那一刻已经冻结，无需快照 + 重读。
@@ -287,8 +289,9 @@
 ### SourceConsumptionAgent（消费代理）
 
 - 角色：**唯一的源消费方**（`pulling` 单飞，所有等待者共享同一趟拉取）
-  与**唯一的落点写入者**——“源的事实”经它交给落点。降级的**触发**也在
-  这里，单独一个成员 `degradeIfNeeded()`（stash 字节超阈值 →
+  与**唯一的落点写入者**——“源的事实”经它交给落点，这一趟的失败也归它派
+  （`warn('pull-failed')`，见下）。降级的**触发**也在这里，单独一个成员
+  `degradeIfNeeded()`（stash 字节超阈值 →
   `distributor.$I.DEGRADE()`；执行仍在结构侧，见 Distributor 一节）
   ——落点写入（`toStash` / `toTransferrer`）与切换策略分开写，阈值这种
   分发器策略一眼看得见。
@@ -331,11 +334,28 @@
   非终态才 `pulledChunkCount++`（计数只在这里做一次：每个等待者 join
   的都是这一趟）。它**不看**任何封口/终止状态；封口后仍在路上的那一笔
   照常入落点，不丢。
-- 两条陷阱（留档，改这里之前先读）：
+- `pullingSettled`（getter）：**只取时机**——在途那一笔落定即可
+  （`Promise.resolve(this.pulling).catch(noop)` 吞掉结果），供
+  `$I.DESTROY` 收场前对齐。它必须在源 `cancel` **之后**读：那时
+  `finished` 已真、`ensure` 起不了新一趟，一次读就够（同“相位只读一次”）。
+- `settlePulling()`：单飞处**先报再抛**（2026-09-25 定）——代理是 pull 的
+  所有者，失败由它派 `warn('pull-failed')`，销毁侧不再替它报（它只取
+  时机）。**报完必须把拒绝还回去**（`throw cause`）：`ensure` 的循环就靠
+  它退出，见陷阱第三条。因此这条 warn 覆盖**任何**一趟失败的 pull，不再
+  只是“销毁时那一笔”。
+- 三条陷阱（留档，改这里之前先读）：
   - 循环在没有封口的情况下提前停 → 读侧拿
     `{ done: false, value: undefined }` 无限空转。
   - 在 `pull()` 里“作废已拉回的一笔” → `pulledChunkCount` 不前进、循环
     条件永远成立 → 把源一路抽干、每笔都丢掉、读侧永不返回。
+  - **让报错把拒绝咽掉**（`catch` 里只报不 `throw`，或把 `.catch` 的返回
+    值当 `pulling`）→ `ensure` 的循环只靠那个拒绝退出：源报错后
+    `finished` 仍假（`SourceReader.READ` 先抛后赋值，`DONE` 不置位）→
+    循环立刻再起一趟，已 error 的流对任何新读**立即**拒绝（标准行为，无
+    真 I/O）→ 再报再循环。实测（`logs/probe-swallow.mjs`）：源直接抛时
+    0.5s CPU 派 20 万条 warn，`setInterval(100)` 在 6 秒里**一次都没
+    跑**——微任务链不排干，宏任务（定时器 / `setImmediate` / IO）全停
+    摆，SIGTERM 也进不来。
 - `finished` 的由来：`SourceReader.READ` 在 `CANCELLED` 之后**不再写
   `DONE`**——只看 `done` 的循环会对着已收摊的源每圈 `SET_DONE` 一次。
 
@@ -562,16 +582,14 @@ I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping`
     `$I.WRITE` / `$I.PEEK` / `$I.WAIT_POSITION` 不再断言——调用面不出包
     （`SYMBOL.TRANSFERRER` 只开 `_I` / `_S`），包内四个入口又都在
     `$I.DROP` 之前的时序里。与 stash 共有的只剩放开载荷（`PENDING_CHUNKS`
-    置空 → drain 靠队列空收手）。一处不同：介质
-    那半是**发起式**——不 `await` `_I.DROP()`（返回值仅用来吞掉拒绝），
-    也不等 drain 收尾（死盘会让 `dumping` 永不落地，而 destroy 不许被拖
-    住）；**同步抛也一并吞掉**（2026-09-23 修）：调用经一个 promise 转手，
-    否则同步抛会漏到 `destroy()` 的返回值上，fire-and-forget 的宿主还会吃
-    到未处理拒绝（Node 默认终止进程）——实测 `logs/probe-drop-throw.mjs`
-    三档（同步返回 / 同步抛 / 异步抛）。转手走 `ignoreRejection(thunk)`：
-    它**只收 thunk**，箭头挪进函数体是 prettier 的成员链规则逼的（3 段
-    链带函数实参必拆行），换回 `then(() => …)` 就会变三行；stash 那半是
-    完成式（同步清干净）。它也**不**替分发器封口：
+    置空 → drain 靠队列空收手）。一处不同：介质那半**归调用方观测**
+    （2026-09-25 改）：`$I.DROP()` 是 async、`await this[_I.DROP]()`，但它
+    仍**不被 await**——失败由调用方挂 `.catch` 派 `warn('drop-failed',
+cause)`（不再吞，也不再经 `ignoreRejection` 转手，那个助手随之删掉）。
+    “不被 await”是硬约束：宿主的放开若挂住（死盘），`destroy()` 不许被一起
+    拖住（2026-09-25 定，用例 `should not wait for the medium to release its
+own resources` 守着）。**drain 同样不等**：死盘会让 `dumping` 永不落地，
+    收摊不陪它。stash 那半是完成式（同步清干净）。它也**不**替分发器封口：
     `SET_DONE()` 由 `destroy()` 先调，拿到的是“先定长后放开”。
 - **放开后的写侧收手**：drain 不需要额外的标志位——队列被置空，下一圈
   自然退出（在途那一笔照旧落介质，落不回来的不管）。`I.FAIL` 改为**首次

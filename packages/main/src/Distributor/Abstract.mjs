@@ -77,9 +77,6 @@ class ReadableStreamDistributor extends EventTarget {
 
     const forked = new ForkedReadableStream.Concrete(this, reader);
 
-    // TODO: review the listener failure here: dispatchEvent never throws, so a
-    //   throwing fork listener becomes an uncaughtException (measured) while
-    //   fork() still answers with the copy.
     this.dispatchEvent(new Event.Fork(forked));
 
     return forked;
@@ -100,8 +97,6 @@ class ReadableStreamDistributor extends EventTarget {
       transferrer[TRANSFERRER.$I.SET_DONE]();
     }
 
-    // TODO: review this pair: the dump failure is only warned, and a throwing
-    //   warn listener becomes an uncaughtException (measured), not a rejection.
     transferrer[TRANSFERRER.$I.DUMP](stash).catch((cause) => {
       this.dispatchEvent(new Event.Warn('dump-failed', cause));
     });
@@ -147,8 +142,6 @@ class ReadableStreamDistributor extends EventTarget {
     }
 
     this[$I.TERMINATION] = new DOMException(TERMINATION_MESSAGE, 'AbortError');
-    // TODO: review a terminate listener that throws: dispatchEvent never
-    //   throws, so it becomes an uncaughtException (measured).
     this.dispatchEvent(new Event.Terminate());
   }
 
@@ -172,15 +165,11 @@ class ReadableStreamDistributor extends EventTarget {
       registry.prune(forked);
     }
 
-    // TODO: review this pair: the cancel failure is only warned, and a throwing
-    //   warn listener becomes an uncaughtException (measured), not a rejection.
     await this[A.I.SOURCE].cancel(termination).catch((cause) => {
       this.dispatchEvent(new Event.Warn('source-cancel-failed', cause));
     });
 
-    // TODO: review what is discarded here: the in-flight pull may carry a
-    //   source error, a host write failure or a latched medium error.
-    await Promise.resolve(this[A.I.AGENT].pulling).catch(() => {});
+    await this[A.I.AGENT].pullingSettled;
 
     const transferrer = this[$I.TRANSFERRER];
     const stash = this[A.I.STASH];
@@ -191,8 +180,9 @@ class ReadableStreamDistributor extends EventTarget {
     } else {
       transferrer[TRANSFERRER.$I.SET_DONE]();
 
-      transferrer[TRANSFERRER.$I.DROP]().catch(() => {
-        // TODO dispatch warn
+      // Not awaited: a hanging release must not drag the teardown along.
+      transferrer[TRANSFERRER.$I.DROP]().catch((cause) => {
+        this.dispatchEvent(new Event.Warn('drop-failed', cause));
       });
     }
   }

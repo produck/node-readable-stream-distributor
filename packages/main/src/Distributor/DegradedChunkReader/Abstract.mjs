@@ -81,14 +81,11 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
       return { done: false, value: chunk };
     }
 
-    return this[I.READ_BACK]();
+    return await this[I.READ_BACK]();
   }
 
   async [I.READ_BACK]() {
-    // TODO: review this await: the initialize chain's failure (a refused dump,
-    //   a host initialize or seek) arrives here and rejects the copy.
     await this[I.INITIALIZED];
-
     await this[I.SYNC]();
 
     // TODO: review a host read that throws, rejects, or answers outside the

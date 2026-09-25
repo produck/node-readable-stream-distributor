@@ -3,6 +3,8 @@ import { _A, TRANSFERRER } from './_External.mjs';
 import * as Event from './Event.mjs';
 import * as Options from './Options/index.mjs';
 
+const noop = () => {};
+
 export default class SourceConsumptionAgent {
   pulling = null;
   pulledChunkCount = 0;
@@ -11,13 +13,29 @@ export default class SourceConsumptionAgent {
     this.distributor = distributor;
   }
 
+  get pullingSettled() {
+    return Promise.resolve(this.pulling).catch(noop);
+  }
+
+  async settlePulling() {
+    try {
+      await this.pull();
+    } catch (cause) {
+      this.distributor.dispatchEvent(new Event.Warn('pull-failed', cause));
+      throw cause;
+    } finally {
+      this.pulling = null;
+    }
+  }
+
   // Ensure the chunk is ready before downstream actually consumes it.
   async ensure(target) {
-    const source = this.distributor[A.I.SOURCE];
+    const { distributor } = this;
+    const source = distributor[A.I.SOURCE];
 
     while (target >= this.pulledChunkCount && !source.finished) {
       if (this.pulling === null) {
-        this.pulling = this.pull().finally(() => (this.pulling = null));
+        this.pulling = this.settlePulling();
       }
 
       await this.pulling;
@@ -94,8 +112,8 @@ export default class SourceConsumptionAgent {
   observeBacklog() {
     const { distributor } = this;
     const transferrer = distributor[$I.TRANSFERRER];
-    // TODO: review both halves: a host getter that throws and a warn listener
-    //   that throws both reject the pull that just wrote a chunk.
+    // TODO: review the option read below: it runs a host-supplied getter
+    //   inside a pull, so a throw rejects the pull that just wrote a chunk.
     const warningLength = Options.Get.MaxBacklogWarningByteLength(distributor);
 
     if (transferrer.pendingByteLength > warningLength) {

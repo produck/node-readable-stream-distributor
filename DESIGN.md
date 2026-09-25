@@ -709,8 +709,9 @@ sequenceDiagram
 | `warn`      | 可恢复异常与观测信号      |
 
 源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。`warn` 的
-code 现在有四个：`dump-failed` / `initialize-failed` / `backlog` /
-`source-cancel-failed`（载荷随 code；框架不装默认处理器，宿主自己接）。
+code 现在有六个：`dump-failed` / `initialize-failed` / `backlog` /
+`pull-failed` / `drop-failed` / `source-cancel-failed`（载荷随 code；框架不装
+默认处理器，宿主自己接）。
 `destroy()`（强档）不另派事件：它是
 宿主动作，调用方本来就知道——收摊何时完成看它返回的那个 Promise。
 
