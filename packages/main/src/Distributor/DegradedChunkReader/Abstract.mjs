@@ -112,10 +112,6 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
 export default Abstract(
   AbstractDegradedChunkReader,
   Abstract({
-    // Contract: `_I.SEEK` crosses one record boundary without reading a body,
-    //   answering `false` when the medium has no record left to cross; the
-    //   driver drives it until that answer. `_I.READ` then serves the record
-    //   the medium-side cursor stands on — that step is the read-back.
     [_I.READ]: M.Method().returns(
       M.OrPromiseLike(ChunkReader.Parser.ReadableStreamResult),
     ),

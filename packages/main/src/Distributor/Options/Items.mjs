@@ -13,7 +13,7 @@ const items = [
     defaultValue: (options) => options.MaxStashByteLength(options),
     assert: Assert.NonNegativeInteger,
   },
-  // Read by the same probe, on the pull that crossed the limit.
+  // Read by the same probe, once the stash is both over the limit and done.
   {
     name: 'DegradeOnStashFullAndDone',
     defaultValue: false,

@@ -252,11 +252,30 @@ describe('Options', () => {
         assert.equal(Get.DegradeOnStashFullAndDone(makeDistributor()), false);
       });
 
-      it('should be read on the pull that crossed the limit', async () => {
+      it('should not be read while over the limit but not done', async () => {
         const distributor = makeDistributor(['a', 'b']);
         const tune = Tune.DegradeOnStashFullAndDone;
         const reads = countGetterReads(distributor, tune, true);
         const reader = distributor.fork().getReader();
+
+        Tune.MaxStashByteLength(distributor, 0);
+
+        await reader.read();
+
+        assert.equal(distributor.degraded, true);
+        assert.equal(reads(), 0);
+      });
+
+      it('should be read once over the limit and done', async () => {
+        const distributor = makeDistributor(['a']);
+        const tune = Tune.DegradeOnStashFullAndDone;
+        const reads = countGetterReads(distributor, tune, true);
+        const reader = distributor.fork().getReader();
+
+        Tune.MaxStashByteLength(distributor, 1);
+
+        await reader.read();
+        assert.equal(distributor.degraded, false);
 
         Tune.MaxStashByteLength(distributor, 0);
 
