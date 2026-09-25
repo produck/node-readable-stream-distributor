@@ -1,3 +1,5 @@
+// TODO: review every probe below: reading a foreign object (instanceof,
+//   toString, locked, getReader) can itself throw out of the constructor.
 export function isReadableStreamLike(value) {
   if (typeof value !== 'object' || value === null) {
     return false;

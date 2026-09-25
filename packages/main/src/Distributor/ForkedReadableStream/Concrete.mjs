@@ -7,6 +7,8 @@ import { DISTRIBUTOR, _A } from './_External.mjs';
 export default class ForkedReadableStream extends ReadableStream {
   constructor(distributor, bufferReader) {
     const registry = distributor[DISTRIBUTOR.A.$I.REGISTRY];
+    // TODO: review a host getter that throws here: fork() throws before the
+    //   stream exists, so nothing is registered and nothing is left behind.
     const highWaterMark = Options.Get.ForkHighWaterMark(distributor);
     let _controller;
 
@@ -22,6 +24,9 @@ export default class ForkedReadableStream extends ReadableStream {
       try {
         return await this[A.I.READER][_A.READER.$I.ENSURE_THEN_READ]();
       } catch (cause) {
+        // TODO: review this funnel: every inward failure — source, host
+        //   write/dump/read/seek, option getter — arrives here and rejects the
+        //   platform's pull (a throwing listener never does, measured).
         conclude();
         Ow.throw(cause);
       }
@@ -30,6 +35,9 @@ export default class ForkedReadableStream extends ReadableStream {
     const pull = async (controller) => {
       const result = await read();
 
+      // TODO: review the platform calls: the controller throws when the
+      //   stream was cancelled or errored between the read and here, and a
+      //   rejection of this async pull is swallowed (measured, see DEV).
       if (result.done) {
         controller.close();
         conclude();

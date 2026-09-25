@@ -34,6 +34,9 @@ export default class SourceConsumptionAgent {
   }
 
   async pull() {
+    // TODO: review the foreign read here: a source failure rejects this pull
+    //   and therefore every waiting copy, and the chunk shape is never
+    //   validated before both stores do byteLength arithmetic on it.
     const { value, done } = await this.distributor[A.I.SOURCE].read();
 
     if (this.distributor.degraded) {
@@ -52,6 +55,9 @@ export default class SourceConsumptionAgent {
     const { distributor } = this;
     const stash = distributor[A.I.STASH];
 
+    // TODO: review both option reads below: they run a host-supplied getter
+    //   inside a pull, so a throw rejects the pulling copy and skips the
+    //   switch, leaving the phase in memory.
     if (stash.byteLength <= Options.Get.MaxStashByteLength(distributor)) {
       return;
     }
@@ -88,6 +94,8 @@ export default class SourceConsumptionAgent {
   observeBacklog() {
     const { distributor } = this;
     const transferrer = distributor[$I.TRANSFERRER];
+    // TODO: review both halves: a host getter that throws and a warn listener
+    //   that throws both reject the pull that just wrote a chunk.
     const warningLength = Options.Get.MaxBacklogWarningByteLength(distributor);
 
     if (transferrer.pendingByteLength > warningLength) {

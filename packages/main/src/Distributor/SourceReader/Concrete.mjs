@@ -15,6 +15,8 @@ export default class SourceReader {
     }
 
     this[I.STREAM] = stream;
+    // TODO: review a foreign getReader() that throws: the locked check above
+    //   does not guarantee it succeeds, and it escapes this constructor.
     this[I.READER] = stream.getReader();
   }
 
@@ -34,6 +36,8 @@ export default class SourceReader {
     // Guarantee: `pull()` is the only caller of `read()`, and `ensure()`
     //   starts no pull once `finished` (`done || cancelled`) is true — so a
     //   read never starts after a cancel.
+    // TODO: review the source failure route: the foreign read error is stored
+    //   when not cancelling, and rethrown to every waiting copy.
     const result = await this[I.READER].read().catch((cause) => {
       if (!this[I.CANCELLED]) {
         this[I.ERROR] = cause;
@@ -61,6 +65,8 @@ export default class SourceReader {
     // Guarantee: `$I.DESTROY` is the only caller, and it is cached by
     //   `$I.DESTROYED`, so a cancel never arrives twice.
     this[I.CANCELLED] = true;
+    // TODO: review a foreign cancel that rejects: it reaches destroy() as a
+    //   warn('source-cancel-failed') and nowhere else.
     await this[I.READER].cancel(reason);
   }
 }

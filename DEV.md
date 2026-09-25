@@ -426,7 +426,7 @@
 
 #### AbstractDegradedChunkReader（降级 · 生命周期持有者）
 
-- `I`：`INITIALIZED` / `CLOSED` / `SEEKED_CHUNK_COUNT` / `ERROR` /
+- `I`：`INITIALIZED` / `CLOSED` / `SEEKED_CHUNK_COUNT` /
   `INITIALIZE` / `SYNC` / `READ_BACK`；`$I`：`TRANSFERRER` / `REQUEST_INITIALIZE`；
   `_I`：`READ` / `INITIALIZE` / `CLOSE` / `SEEK`；`_S`：`TRANSFERRER_CTOR`
   （策略给出的写侧**类**）。
@@ -439,8 +439,13 @@
 - **请求初始化**：`$I.REQUEST_INITIALIZE(progress)` 同步播种位置，并把
   `I.INITIALIZED` 置为链体 `I.INITIALIZE`：等 `get dumping`（整份转移
   落地）→ `_I.INITIALIZE` 打开介质 → `I.SYNC()` 进度同步（只能走到介质
-  当时能到的地方）。失败闩进 `I.ERROR`、不 reject，由下一笔**需要介质**
-  的读抛出（只吃队列的读者不受影响）——宿主侧 open / 定位失败走这一支，
+  当时能到的地方）。**失败就是链体 reject**（2026-09-25 改）：不再存进
+  `I.ERROR`——那份状态随本次改动一并删，判据只留一处。两个观测点：
+  分发器的 `I.INITIALIZE_READER` 等这条 promise，catch 到就派
+  `warn('initialize-failed', cause)`（发起那一刻即可见）；需要介质的
+  那一读在 `I.READ_BACK` 的 `await this[I.INITIALIZED]` 上拿到同一个
+  cause（只吃队列的读者不受影响，它们根本不 await 这条链）。
+  宿主侧 open / 定位失败走这一支，
   框架侧 dump 失败则由门 `$I.WAIT_POSITION` 先抛（带的是原始 cause）；
   实测 `logs/probe-read-back-guard.mjs`：宿主侧失败时宿主 `_I.READ` 调用
   数为 0，证明失败出自读器侧而不是介质。只吃队列的读者也照做，代价是

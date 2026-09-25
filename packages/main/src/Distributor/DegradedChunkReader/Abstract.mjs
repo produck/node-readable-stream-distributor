@@ -1,4 +1,3 @@
-import * as Ow from '@produck/ow';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as ChunkReader from '../ChunkReader/index.mjs';
@@ -9,7 +8,6 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   [I.CLOSED] = false;
   [I.INITIALIZED];
   [A.I.SEEKED_COUNT] = 0;
-  [I.ERROR] = null;
 
   get chunkStash() {
     return this[_A.READER.A.$I.STASH];
@@ -31,16 +29,16 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   [$I.REQUEST_INITIALIZE](progress) {
     this[_A.READER.A.$I.CONSUMED_COUNT] = progress;
     this[I.INITIALIZED] = this[I.INITIALIZE]();
+
+    return this[I.INITIALIZED];
   }
 
   async [I.INITIALIZE]() {
-    try {
-      await this[$I.TRANSFERRER].dumping;
-      await this[_I.INITIALIZE]();
-      await this[I.SYNC]();
-    } catch (cause) {
-      this[I.ERROR] = cause;
-    }
+    // TODO: review the per-reader report: a refused dump rejects this chain
+    //   too, so every reader adds its own warn('initialize-failed').
+    await this[$I.TRANSFERRER].dumping;
+    await this[_I.INITIALIZE]();
+    await this[I.SYNC]();
   }
 
   async [I.SYNC]() {
@@ -48,6 +46,9 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     let count = this[A.I.SEEKED_COUNT];
 
     while (count < target) {
+      // TODO: review the two routes of a host seek failure: rejecting the
+      //   initialize chain (reported to the distributor), or rejecting the
+      //   copy when SYNC runs from a read.
       if (!(await this[_I.SEEK]())) {
         break;
       }
@@ -59,14 +60,12 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   [_A.READER.$I.CLOSE]() {
-    // A read in flight when destroy() fires concludes its own stream once
-    //   it settles — if it settles as a failure, this arrives a second
-    //   time. The flag keeps that second arrival from reaching _I.CLOSE.
     if (this[I.CLOSED]) {
       return;
     }
 
     this[I.CLOSED] = true;
+    // TODO: review the silent swallow: a host close failure has no observer.
     Promise.resolve(this[_I.CLOSE]()).catch(() => {});
   }
 
@@ -86,17 +85,14 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   async [I.READ_BACK]() {
+    // TODO: review this await: the initialize chain's failure (a refused dump,
+    //   a host initialize or seek) arrives here and rejects the copy.
     await this[I.INITIALIZED];
-
-    // The initialize chain stores its failure instead of rejecting, so the
-    //   first read that needs the medium surfaces it here — a failed dump is
-    //   caught by $I.WAIT_POSITION first, carrying the raw cause.
-    if (this[I.ERROR] !== null) {
-      Ow.throw(this[I.ERROR]);
-    }
 
     await this[I.SYNC]();
 
+    // TODO: review a host read that throws, rejects, or answers outside the
+    //   declared result shape: it rejects this copy's stream.
     const result = await this[_I.READ]();
 
     if (!result.done) {

@@ -18,6 +18,8 @@ for (const { name, assert } of items) {
       const options = distributor[OPTIONS];
       const getter = normalizeGetter(value);
 
+      // TODO: review the install-time call: a host value function that throws
+      //   escapes Options.Tune.
       assert(getter(options));
       options[name] = getter;
     },
@@ -27,6 +29,8 @@ for (const { name, assert } of items) {
     [GET_NAME](distributor) {
       const options = distributor[OPTIONS];
 
+      // TODO: review the read-time call: a host getter that throws escapes
+      //   Options.Get, get options, and every internal probe that reads one.
       return options[name](options);
     },
   }[GET_NAME];

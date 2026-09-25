@@ -6,10 +6,6 @@ import { _A } from './_External.mjs';
 
 const noop = () => {};
 
-function ignoreRejection(thunk) {
-  return Promise.resolve().then(thunk).catch(noop);
-}
-
 class AbstractTransferrer {
   static [_S.PARSE_ARGUMENTS](args) {
     return args;
@@ -51,6 +47,28 @@ class AbstractTransferrer {
     this[I.SETTLE]();
   }
 
+  async [I.START_DUMPING](stash) {
+    this[I.PENDING_CHUNKS] = [...stash.chunks()];
+
+    try {
+      await this[_I.DUMP](stash);
+    } catch (cause) {
+      this[I.FAIL](cause);
+      Ow.Error.Common('Failed to dump the ChunkStash.', { cause });
+    }
+
+    const { length } = stash;
+
+    stash[_A.STASH.$I.DROP]();
+    this[I.PENDING_CHUNKS].splice(0, length);
+    this[A.I.WRITTEN_COUNT] = length;
+    this[I.SETTLE]();
+  }
+
+  [$I.DUMP](stash) {
+    return (this[I.DUMPING] = this[I.START_DUMPING](stash));
+  }
+
   async [I.DRAIN]() {
     if (this[I.DUMPING] !== null) {
       await this[I.DUMPING].catch(noop);
@@ -63,9 +81,10 @@ class AbstractTransferrer {
       while (this[I.PENDING_CHUNKS].length > 0) {
         const buffer = this[I.PENDING_CHUNKS][0];
 
-        await this[_I.WRITE](buffer).catch((cause) => this[I.FAIL](cause));
-
-        if (this[I.ERROR] !== null) {
+        try {
+          await this[_I.WRITE](buffer);
+        } catch (cause) {
+          this[I.FAIL](cause);
           break;
         }
 
@@ -78,28 +97,9 @@ class AbstractTransferrer {
     this[I.DRAINING] = null;
   }
 
-  async [I.START_DUMPING](stash) {
-    this[I.PENDING_CHUNKS] = [...stash.chunks()];
-
-    const { length } = stash;
-
-    try {
-      await this[_I.DUMP](stash);
-      stash[_A.STASH.$I.DROP]();
-      this[I.PENDING_CHUNKS].splice(0, length);
-      this[A.I.WRITTEN_COUNT] = length;
-      this[I.SETTLE]();
-    } catch (cause) {
-      this[I.FAIL](cause);
-      Ow.Error.Common('Failed to dump the ChunkStash.', { cause });
-    }
-  }
-
-  [$I.DUMP](stash) {
-    return (this[I.DUMPING] = this[I.START_DUMPING](stash));
-  }
-
   [$I.WRITE](chunk) {
+    // TODO: review the resurfacing path: a medium failure latched earlier
+    //   rejects the pull that writes the next chunk.
     if (this[I.ERROR] !== null) {
       Ow.throw(this[I.ERROR]);
     }
@@ -121,6 +121,8 @@ class AbstractTransferrer {
 
     const accepted = await promise;
 
+    // TODO: review this surface: a latched medium failure reaches the waiting
+    //   copy here, as a rejection of its read.
     if (!accepted && this[I.ERROR] !== null) {
       Ow.throw(this[I.ERROR]);
     }
@@ -135,11 +137,11 @@ class AbstractTransferrer {
     this[I.SETTLE]();
   }
 
-  [$I.DROP]() {
+  async [$I.DROP]() {
     this[I.DROPPED] = true;
     this[I.PENDING_CHUNKS] = [];
     this[I.PENDING_BYTE_LENGTH] = 0;
-    ignoreRejection(() => this[_I.DROP]());
+    await this[_I.DROP]();
   }
 
   get dumping() {

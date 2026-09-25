@@ -1,9 +1,22 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { Distributor, Options } from '@produck/readable-stream-distributor';
+import {
+  Distributor,
+  Options,
+  SYMBOL,
+} from '@produck/readable-stream-distributor';
 
-import { drain, makeSource, TestDistributor } from '#test/baseline.mjs';
+import {
+  drain,
+  makeFamily,
+  makeSource,
+  settle,
+  TestDegradedChunkReader,
+  TestDistributor,
+} from '#test/baseline.mjs';
+
+const { _I: READER } = SYMBOL.DEGRADED_CHUNK_READER;
 
 const EXPECTED = {
   UNIMPLEMENTED: { message: /must be implemented in the subclass/ },
@@ -58,5 +71,35 @@ describe('.fork()', () => {
     const copy = distributor.fork();
 
     assert.deepEqual(forked, [copy]);
+  });
+
+  it('should dispatch warn(initialize-failed) after the switch', async () => {
+    const cause = new Error('the medium refused to open');
+
+    class RefusingInitializeReader extends TestDegradedChunkReader {
+      [READER.INITIALIZE]() {
+        throw cause;
+      }
+    }
+
+    const family = makeFamily({ reader: RefusingInitializeReader });
+    const distributor = new family.Distributor(makeSource(['a']));
+    const warns = [];
+
+    distributor.addEventListener('warn', (event) => warns.push(event.detail));
+
+    Options.Tune.MaxStashByteLength(distributor, 0);
+
+    await assert.rejects(distributor.fork().getReader().read(), cause);
+    await settle();
+
+    const atSwitch = warns.length;
+
+    distributor.fork();
+    await settle();
+
+    assert.equal(warns.length, atSwitch + 1);
+    assert.equal(warns.at(-1).code, 'initialize-failed');
+    assert.equal(warns.at(-1).payload, cause);
   });
 });

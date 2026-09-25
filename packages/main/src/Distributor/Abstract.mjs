@@ -52,6 +52,14 @@ class ReadableStreamDistributor extends EventTarget {
     return this[$I.TERMINATION] !== null;
   }
 
+  async [I.INITIALIZE_READER](reader, progress) {
+    try {
+      await reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](progress);
+    } catch (cause) {
+      this.dispatchEvent(new Event.Warn('initialize-failed', cause));
+    }
+  }
+
   fork() {
     if (this.terminated) {
       Ow.Error.Common('Distributor has been terminated');
@@ -64,14 +72,54 @@ class ReadableStreamDistributor extends EventTarget {
     const reader = new ChunkReaderImpl(agent, stash, transferrer);
 
     if (ChunkReaderImpl === this[A.I.CTOR.READER.DEGRADED]) {
-      reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](0);
+      this[I.INITIALIZE_READER](reader, 0);
     }
 
     const forked = new ForkedReadableStream.Concrete(this, reader);
 
+    // TODO: review the listener failure here: dispatchEvent never throws, so a
+    //   throwing fork listener becomes an uncaughtException (measured) while
+    //   fork() still answers with the copy.
     this.dispatchEvent(new Event.Fork(forked));
 
     return forked;
+  }
+
+  [$I.DEGRADE]() {
+    const {
+      [A.I.CTOR.READER.DEGRADED]: DegradedChunkReaderImpl,
+      [A.I.CTOR.TRANSFERRER]: TransferrerImpl,
+    } = this;
+
+    const agent = this[A.I.AGENT];
+    const stash = this[A.I.STASH];
+    const { byteLength } = stash;
+    const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
+
+    if (stash.done) {
+      transferrer[TRANSFERRER.$I.SET_DONE]();
+    }
+
+    // TODO: review this pair: the dump failure is only warned, and a throwing
+    //   warn listener becomes an uncaughtException (measured), not a rejection.
+    transferrer[TRANSFERRER.$I.DUMP](stash).catch((cause) => {
+      this.dispatchEvent(new Event.Warn('dump-failed', cause));
+    });
+
+    this[$I.TRANSFERRER] = transferrer;
+    this[A.I.CTOR.READER.CURRENT] = DegradedChunkReaderImpl;
+
+    for (const [forked] of this[A.$I.REGISTRY]) {
+      const reader = new DegradedChunkReaderImpl(agent, stash, transferrer);
+      const bufferChunkReader = forked[_A.FORKED.A.$I.READER];
+      const progress = bufferChunkReader[_A.READER.A.$I.CONSUMED_COUNT];
+
+      this[I.INITIALIZE_READER](reader, progress);
+      bufferChunkReader[_A.BUFFER.$I.HANDOVER](reader);
+      forked[_A.FORKED.$I.SET_DEGRADED_CHUNK_READER](reader);
+    }
+
+    this.dispatchEvent(new Event.Degrade(byteLength));
   }
 
   setTransferrerArgs(...args) {
@@ -93,47 +141,14 @@ class ReadableStreamDistributor extends EventTarget {
     return this[A.I.CTOR.READER.DEGRADED][_A.DEGRADED._S.TRANSFERRER_CTOR];
   }
 
-  [$I.DEGRADE]() {
-    const {
-      [A.I.CTOR.READER.DEGRADED]: DegradedChunkReaderImpl,
-      [A.I.CTOR.TRANSFERRER]: TransferrerImpl,
-    } = this;
-
-    const agent = this[A.I.AGENT];
-    const stash = this[A.I.STASH];
-    const { byteLength } = stash;
-    const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
-
-    if (stash.done) {
-      transferrer[TRANSFERRER.$I.SET_DONE]();
-    }
-
-    transferrer[TRANSFERRER.$I.DUMP](stash).catch((cause) => {
-      this.dispatchEvent(new Event.Warn('dump-failed', cause));
-    });
-
-    this[$I.TRANSFERRER] = transferrer;
-    this[A.I.CTOR.READER.CURRENT] = DegradedChunkReaderImpl;
-
-    for (const [forked] of this[A.$I.REGISTRY]) {
-      const reader = new DegradedChunkReaderImpl(agent, stash, transferrer);
-      const bufferChunkReader = forked[_A.FORKED.A.$I.READER];
-      const progress = bufferChunkReader[_A.READER.A.$I.CONSUMED_COUNT];
-
-      reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](progress);
-      bufferChunkReader[_A.BUFFER.$I.HANDOVER](reader);
-      forked[_A.FORKED.$I.SET_DEGRADED_CHUNK_READER](reader);
-    }
-
-    this.dispatchEvent(new Event.Degrade(byteLength));
-  }
-
   terminate() {
     if (this.terminated) {
       return;
     }
 
     this[$I.TERMINATION] = new DOMException(TERMINATION_MESSAGE, 'AbortError');
+    // TODO: review a terminate listener that throws: dispatchEvent never
+    //   throws, so it becomes an uncaughtException (measured).
     this.dispatchEvent(new Event.Terminate());
   }
 
@@ -157,10 +172,14 @@ class ReadableStreamDistributor extends EventTarget {
       registry.prune(forked);
     }
 
+    // TODO: review this pair: the cancel failure is only warned, and a throwing
+    //   warn listener becomes an uncaughtException (measured), not a rejection.
     await this[A.I.SOURCE].cancel(termination).catch((cause) => {
       this.dispatchEvent(new Event.Warn('source-cancel-failed', cause));
     });
 
+    // TODO: review what is discarded here: the in-flight pull may carry a
+    //   source error, a host write failure or a latched medium error.
     await Promise.resolve(this[A.I.AGENT].pulling).catch(() => {});
 
     const transferrer = this[$I.TRANSFERRER];
@@ -171,7 +190,10 @@ class ReadableStreamDistributor extends EventTarget {
       stash[_A.STASH.$I.DROP]();
     } else {
       transferrer[TRANSFERRER.$I.SET_DONE]();
-      transferrer[TRANSFERRER.$I.DROP]();
+
+      transferrer[TRANSFERRER.$I.DROP]().catch(() => {
+        // TODO dispatch warn
+      });
     }
   }
 }

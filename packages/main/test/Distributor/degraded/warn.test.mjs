@@ -7,10 +7,12 @@ import {
   makeFamily,
   makeSource,
   settle,
+  TestDegradedChunkReader,
   TestTransferrer,
 } from '#test/baseline.mjs';
 
 const { _I: TRANSFERRER } = SYMBOL.TRANSFERRER;
+const { _I: READER } = SYMBOL.DEGRADED_CHUNK_READER;
 
 it('should dispatch warn(dump-failed) when the dump fails', async () => {
   const refused = new Error('the medium refuses the dump');
@@ -33,10 +35,13 @@ it('should dispatch warn(dump-failed) when the dump fails', async () => {
   await reader.read();
   await settle();
 
-  assert.equal(warns.length, 1);
-  assert.equal(warns[0].code, 'dump-failed');
+  assert.deepEqual(
+    warns.map((warn) => warn.code),
+    ['dump-failed', 'initialize-failed'],
+  );
   assert.match(warns[0].payload.message, /Failed to dump the ChunkStash/);
   assert.equal(warns[0].payload.cause, refused);
+  assert.equal(warns[1].payload, warns[0].payload);
 });
 
 it('should dispatch warn(backlog) once the backlog is over the limit', async () => {
@@ -63,4 +68,30 @@ it('should dispatch warn(backlog) once the backlog is over the limit', async () 
   assert.equal(warns.length, 1);
   assert.equal(warns[0].code, 'backlog');
   assert.equal(warns[0].payload.byteLength, 5);
+});
+
+it('should dispatch warn(initialize-failed) on the switch', async () => {
+  const cause = new Error('the medium refused to open');
+
+  class RefusingInitializeReader extends TestDegradedChunkReader {
+    [READER.INITIALIZE]() {
+      throw cause;
+    }
+  }
+
+  const family = makeFamily({ reader: RefusingInitializeReader });
+  const distributor = new family.Distributor(makeSource(['a']));
+  const reader = distributor.fork().getReader();
+  const warns = [];
+
+  distributor.addEventListener('warn', (event) => warns.push(event.detail));
+
+  Options.Tune.MaxStashByteLength(distributor, 0);
+
+  await assert.rejects(reader.read(), cause);
+  await settle();
+
+  assert.equal(warns.length, 1);
+  assert.equal(warns[0].code, 'initialize-failed');
+  assert.equal(warns[0].payload, cause);
 });
