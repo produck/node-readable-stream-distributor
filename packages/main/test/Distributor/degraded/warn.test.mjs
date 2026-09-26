@@ -39,9 +39,38 @@ it('should dispatch warn(dump-failed) when the dump fails', async () => {
     warns.map((warn) => warn.code),
     ['dump-failed', 'initialize-failed'],
   );
-  assert.match(warns[0].payload.message, /Failed to dump the ChunkStash/);
-  assert.equal(warns[0].payload.cause, refused);
-  assert.equal(warns[1].payload, warns[0].payload);
+  assert.equal(warns[0].payload, refused);
+  assert.match(warns[1].payload.message, /Failed to dump the ChunkStash/);
+  assert.equal(warns[1].payload.cause, refused);
+});
+
+it('should dispatch warn(write-failed) when the write fails', async () => {
+  const refused = new Error('the medium refuses the write');
+
+  class RefusingWriteTransferrer extends TestTransferrer {
+    [TRANSFERRER.WRITE]() {
+      throw refused;
+    }
+  }
+
+  const family = makeFamily({ medium: RefusingWriteTransferrer });
+  const distributor = new family.Distributor(makeSource(['a', 'b']));
+  const reader = distributor.fork().getReader();
+  const warns = [];
+
+  distributor.addEventListener('warn', (event) => warns.push(event.detail));
+  Options.Tune.MaxStashByteLength(distributor, 0);
+  Options.Tune.MaxBacklogWarningByteLength(distributor, 1024);
+
+  await reader.read();
+
+  assert.equal((await reader.read()).value.toString(), 'b');
+
+  await settle();
+
+  assert.equal(warns.length, 1);
+  assert.equal(warns[0].code, 'write-failed');
+  assert.equal(warns[0].payload, refused);
 });
 
 it('should dispatch warn(backlog) once the backlog is over the limit', async () => {

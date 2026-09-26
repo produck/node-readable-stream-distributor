@@ -2,7 +2,7 @@ import * as Ow from '@produck/ow';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import { I, $I, _I, _S, A } from './_Symbol.mjs';
-import { _A } from './_External.mjs';
+import { DISTRIBUTOR, _A } from './_External.mjs';
 
 const noop = () => {};
 
@@ -20,6 +20,7 @@ class AbstractTransferrer {
   [I.ERROR] = null;
   [I.DONE] = false;
   [I.DROPPED] = false;
+  [I.DISTRIBUTOR] = null;
 
   [I.SETTLE]() {
     const waitingPositions = this[I.WAITING_POSITION_TABLE];
@@ -51,11 +52,10 @@ class AbstractTransferrer {
     this[I.PENDING_CHUNKS] = [...stash.chunks()];
 
     try {
-      // TODO: review the host dump call: a throw or a rejection is latched
-      //   here and answered to the caller.
       await this[_I.DUMP](stash);
     } catch (cause) {
       this[I.FAIL](cause);
+      this[I.DISTRIBUTOR][DISTRIBUTOR.$I.WARN]('dump-failed', cause);
       Ow.Error.Common('Failed to dump the ChunkStash.', { cause });
     }
 
@@ -65,6 +65,10 @@ class AbstractTransferrer {
     this[I.PENDING_CHUNKS].splice(0, length);
     this[A.I.WRITTEN_COUNT] = length;
     this[I.SETTLE]();
+  }
+
+  [$I.SET_DISTRIBUTOR](distributor) {
+    this[I.DISTRIBUTOR] = distributor;
   }
 
   [$I.DUMP](stash) {
@@ -84,11 +88,10 @@ class AbstractTransferrer {
         const buffer = this[I.PENDING_CHUNKS][0];
 
         try {
-          // TODO: review the host write call: a failure is latched here and
-          //   has no observer until a later pull replays it.
           await this[_I.WRITE](buffer);
         } catch (cause) {
           this[I.FAIL](cause);
+          this[I.DISTRIBUTOR][DISTRIBUTOR.$I.WARN]('write-failed', cause);
           break;
         }
 
@@ -141,9 +144,13 @@ class AbstractTransferrer {
     this[I.DROPPED] = true;
     this[I.PENDING_CHUNKS] = [];
     this[I.PENDING_BYTE_LENGTH] = 0;
-    // TODO: review the host release call: its failure is answered to the
-    //   caller, which reports it without waiting.
-    await this[_I.DROP]();
+
+    try {
+      await this[_I.DROP]();
+    } catch (cause) {
+      this[I.DISTRIBUTOR][DISTRIBUTOR.$I.WARN]('drop-failed', cause);
+      Ow.throw(cause);
+    }
   }
 
   get dumping() {

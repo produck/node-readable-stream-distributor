@@ -157,7 +157,8 @@
   归写侧（`START_DUMPING` 成功自己 DROP），内存相的 drop 归 `destroy()`。
 - 降级：**触发在消费代理**（stash 字节超过构造时定下的阈值），**执行在分发器** `$I.DEGRADE`——
   构造写侧实例（按读器家族 `_S.TRANSFERRER_CTOR` + 预置构造参数）、
-  执行其 `dump`、遍历 registry、选降级 reader 类、换掉各 fork 的读取器
+  把它挂上分发器（`$I.SET_DISTRIBUTOR`）、执行其 `dump`、
+  遍历 registry、选降级 reader 类、换掉各 fork 的读取器
   都留在结构侧。**末尾派 `degrade` 事件**（载荷 `{ byteLength }`：入口处捕获的
   stash 字节数；派发在相位翻转与逐拷贝交接**之后**，所以事件里 `get degraded`
   已为真、监听者当场 `fork()` 拿到的也是降级读器）。
@@ -643,10 +644,11 @@
     `$I.WRITE` / `$I.PEEK` / `$I.WAIT_POSITION` 不再断言——调用面不出包
     （`SYMBOL.TRANSFERRER` 只开 `_I` / `_S`），包内四个入口又都在
     `$I.DROP` 之前的时序里。与 stash 共有的只剩放开载荷（`PENDING_CHUNKS`
-    置空 → drain 靠队列空收手）。一处不同：介质那半**归调用方观测**
-    （2026-09-25 改）：`$I.DROP()` 是 async、`await this[_I.DROP]()`，但它
-    仍**不被 await**——失败由调用方挂 `.catch` 派 `warn('drop-failed',
-cause)`（不再吞，也不再经 `ignoreRejection` 转手，那个助手随之删掉）。
+    置空 → drain 靠队列空收手）。一处不同：介质那半**归它自己观测**
+    （2026-09-26 改）：`$I.DROP()` 是 async、`await this[_I.DROP]()`，但它
+    仍**不被 await**——失败由它就地派 `warn('drop-failed',
+cause)`（不再吞，也不再经 `ignoreRejection` 转手，那个助手随之删掉）；调用方
+    （`$I.DESTROY`）只吞、不代派（否则一处失败两条事件）。
     “不被 await”是硬约束：宿主的放开若挂住（死盘），`destroy()` 不许被一起
     拖住（2026-09-25 定，用例 `should not wait for the medium to release its
 own resources` 守着）。**drain 同样不等**：死盘会让 `dumping` 永不落地，
@@ -733,7 +735,9 @@ own resources` 守着）。**drain 同样不等**：死盘会让 `dumping` 永�
   transferrer 上（源已尽那一趟拉取由 agent 同步置位）。它不只置位——
   还结算门："该位永不会有块"正是由它冻结的终值算出来的。
 - **配对**：写侧**类**由降级读器家族声明（`_S.TRANSFERRER_CTOR`，
-  基类静态抽象）；分发器在降级时取它构造实例并持有（`$I.TRANSFERRER`），
+  基类静态抽象）；分发器在降级时构造实例、立刻把**自己**挂上去
+  （`$I.SET_DISTRIBUTOR`，三个宿主成员的就地报告靠它）、再持有
+  （`$I.TRANSFERRER`）、
   再交接给各拷贝的新读取器。实例与 `ChunkStash` 1:1，因此不再需要
   一次性守卫与 `instanceof` 校验。转存产物可留在实例自己的字段里。
 
@@ -830,9 +834,13 @@ own resources` 守着）。**drain 同样不等**：死盘会让 `dumping` 永�
   `$I.DESTROY` 只吞。**出口唯一**（2026-09-26 收口）：以上所有 `warn` 都
   经分发器的受保护成员 `$I.WARN(code, payload)` 派发——出口一处，
   报告点仍各自在失败的发生处。
-- **能力受限才上移一层**（介质侧拿不到分发器，或调用方是唯一观测者）：
-  `dump-failed` / `drop-failed`（介质模板成员，由 `$I.DEGRADE` 与
-  `$I.DESTROY` 代派）。
+- **介质侧同样在发生处**（2026-09-26 收口，代派没有了）：转移器**构造后**
+  被分发器挂上自己（`$I.SET_DISTRIBUTOR`——构造器收的是宿主参数，塞不进
+  分发器），于是三个宿主模板成员各自就地上报：
+  `_I.DUMP` → `dump-failed`（载荷是**宿主原始因**；包装错随后照旧抛给
+  调用链）· `_I.WRITE` → `write-failed`（闩住后仍会在后续每趟 pull 里由
+  `$I.WRITE` 同步抛、代理派 `pull-failed`）· `_I.DROP` → `drop-failed`
+  再原样抛给调用者。
 - **重复上报不去抖**：与 `backlog` 同族——一个因（dump 被拒）可以让每个
   降级 reader 各派一条 `initialize-failed`；闩住的介质错误会让之后每趟消费
   各派一条 `pull-failed`。水准信号，限频归宿主。

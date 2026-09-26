@@ -1,3 +1,4 @@
+import * as Ow from '@produck/ow';
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as ChunkReader from '../ChunkReader/index.mjs';
@@ -41,7 +42,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
       await this[I.SYNC]();
     } catch (cause) {
       distributor[DISTRIBUTOR.$I.WARN]('initialize-failed', cause);
-      throw cause;
+      Ow.throw(cause);
     }
   }
 
@@ -60,7 +61,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
       }
     } catch (cause) {
       distributor[DISTRIBUTOR.$I.WARN]('seek-failed', cause);
-      throw cause;
+      Ow.throw(cause);
     }
 
     this[A.I.SEEKED_COUNT] = count;
@@ -108,7 +109,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
       result = await this[_I.READ]();
     } catch (cause) {
       distributor[DISTRIBUTOR.$I.WARN]('read-failed', cause);
-      throw cause;
+      Ow.throw(cause);
     }
 
     if (!result.done) {

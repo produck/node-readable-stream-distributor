@@ -110,18 +110,18 @@ graph TD
 
 ### 模块
 
-| 模块                           | 职责                                                                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ReadableStreamDistributor`    | 抽象类——多拷贝分发，引用计数，策略切换。阈值是构造参数（默认 `1GiB`），落受保护字段                                                                    |
-| `AbstractChunkReader`          | 拷贝侧读取抽象——受保护 `I.DISTRIBUTOR` 持分发器（`agent` / `stash` 按需取）；进度与前沿驱动（`$I.ENSURE_THEN_READ` → `$I.READ` → `_I.READ`）           |
-| `BufferChunkReader`            | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
-| `AbstractDegradedChunkReader`  | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                     |
-| `AbstractTransferrer`          | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE` / `$I.DROP`，读侧位置门与队列计数                                        |
-| `ChunkStash`                   | 共享内存缓冲容器——聚合 chunk，写面为受保护生命周期（push/setDone/drop），读侧公开                                                                      |
-| `ForkedReadableStream`         | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                 |
-| `SourceReader`                 | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态、源侧失败在此派发），不含调度                                                      |
-| `SourceConsumptionAgent`       | 源流消费代理（内部类）——统筹调度（拉不拉、并发合并 single-flight、背压）与落点；按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享 |
-| `ForkedReadableStreamRegistry` | fork 活体注册表（内部协作类）——`add(fork)` 入册、可遍历供降级换读器、fork 出口 `prune(fork)` 出表（成员资格 = 降级交接名单，无扫描清理）               |
+| 模块                           | 职责                                                                                                                                                                 |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReadableStreamDistributor`    | 抽象类——多拷贝分发，引用计数，策略切换。阈值是构造参数（默认 `1GiB`），落受保护字段                                                                                  |
+| `AbstractChunkReader`          | 拷贝侧读取抽象——受保护 `I.DISTRIBUTOR` 持分发器（`agent` / `stash` 按需取）；进度与前沿驱动（`$I.ENSURE_THEN_READ` → `$I.READ` → `_I.READ`）                         |
+| `BufferChunkReader`            | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                                   |
+| `AbstractDegradedChunkReader`  | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                                   |
+| `AbstractTransferrer`          | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE` / `$I.DROP` + `$I.SET_DISTRIBUTOR`（构造后挂上自己，失败就地报），读侧位置门与队列计数 |
+| `ChunkStash`                   | 共享内存缓冲容器——聚合 chunk，写面为受保护生命周期（push/setDone/drop），读侧公开                                                                                    |
+| `ForkedReadableStream`         | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                               |
+| `SourceReader`                 | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态、源侧失败在此派发），不含调度                                                                    |
+| `SourceConsumptionAgent`       | 源流消费代理（内部类）——统筹调度（拉不拉、并发合并 single-flight、背压）与落点；按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享               |
+| `ForkedReadableStreamRegistry` | fork 活体注册表（内部协作类）——`add(fork)` 入册、可遍历供降级换读器、fork 出口 `prune(fork)` 出表（成员资格 = 降级交接名单，无扫描清理）                             |
 
 ### 类图
 
@@ -424,8 +424,8 @@ graph BT
     分发器职责。
   - **不设 `_I.OPEN`**：抽象初始化 `_I.INITIALIZE` 已包含 open 概念。
 - `AbstractTransferrer` 是降级家族写侧的内部抽象（实例），介质中性；
-  实例由分发器在降级时构造并持有（类取自读器家族的
-  `_S.TRANSFERRER_CTOR`），与 `ChunkStash` 1:1；构造参数由策略
+  实例由分发器在降级时构造、挂上自己（`$I.SET_DISTRIBUTOR`）并持有（类取自
+  读器家族的 `_S.TRANSFERRER_CTOR`），与 `ChunkStash` 1:1；构造参数由策略
   经 `setTransferrerArgs()` 预置（`_S.PARSE_ARGUMENTS` 归一、默认恒等），
   不解释：
   - **无阻塞调度的复杂性全在此作用域**：降级时**接管** stash 的整份
@@ -438,7 +438,7 @@ graph BT
     `_I.DUMP` 开工，成功即 `DROP` 载体、清掉接管的这 L 条（已落盘）并把
     水位一次推满；失败只闩 `I.ERROR` 并结算门（保留现场不 DROP；接管的
     这批仍在队列里，各拷贝按自己位置读到底，只有永不会有块的位被拒），
-    返回的 Promise 以转义错误拒给分发器挂 `warn`。
+    返回的 Promise 以转义错误拒（`dump-failed` 已在发生处派出）。
   - `$I.WRITE(buffer)` — 活数据**入队即返回**（不碰介质）：追加待写
     队列并确保 drain 在途；队列无上限，积压处置归下游。
   - `$I.SET_DONE()` — 源已尽在降级相位的落点：agent 在 done 那趟拉取
@@ -724,10 +724,10 @@ sequenceDiagram
 
 源流正常结束（源出错已有 `warn('source-read-failed')` 兜着）、全部 fork
 离开等更细粒度事件尚未实现，属规划。`warn` 的
-code 现在有十个：`backlog` / `close-failed` / `drop-failed` / `dump-failed` /
+code 现在有十一个：`backlog` / `close-failed` / `drop-failed` / `dump-failed` /
 `initialize-failed` / `pull-failed` / `read-failed` / `seek-failed` /
-`source-cancel-failed` / `source-read-failed`（载荷随 code；框架不装默认
-处理器，宿主自己接）。
+`source-cancel-failed` / `source-read-failed` / `write-failed`（载荷随 code；
+框架不装默认处理器，宿主自己接）。
 `destroy()`（强档）不另派事件：它是
 宿主动作，调用方本来就知道——收摊何时完成看它返回的那个 Promise。
 

@@ -71,7 +71,7 @@ export default class SourceReader {
       await this[I.READER].cancel(reason);
     } catch (cause) {
       distributor[DISTRIBUTOR.$I.WARN]('source-cancel-failed', cause);
-      throw cause;
+      Ow.throw(cause);
     }
   }
 }

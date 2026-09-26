@@ -144,7 +144,8 @@ export declare namespace Event {
     | { code: 'read-failed'; payload: unknown }
     | { code: 'seek-failed'; payload: unknown }
     | { code: 'source-cancel-failed'; payload: unknown }
-    | { code: 'source-read-failed'; payload: unknown };
+    | { code: 'source-read-failed'; payload: unknown }
+    | { code: 'write-failed'; payload: unknown };
 
   type WarnCode = WarnDetail['code'];
 
