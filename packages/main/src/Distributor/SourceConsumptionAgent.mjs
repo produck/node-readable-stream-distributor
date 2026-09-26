@@ -1,9 +1,6 @@
 import { $I, A } from './_Symbol.mjs';
 import { _A, TRANSFERRER } from './_External.mjs';
-import * as Event from './Event.mjs';
 import * as Options from './Options/index.mjs';
-
-const noop = () => {};
 
 export default class SourceConsumptionAgent {
   pulling = null;
@@ -14,14 +11,14 @@ export default class SourceConsumptionAgent {
   }
 
   get pullingSettled() {
-    return Promise.resolve(this.pulling).catch(noop);
+    return Promise.allSettled([this.pulling]);
   }
 
   async settlePulling() {
     try {
       await this.pull();
     } catch (cause) {
-      this.distributor.dispatchEvent(new Event.Warn('pull-failed', cause));
+      this.distributor[$I.WARN]('pull-failed', cause);
       throw cause;
     } finally {
       this.pulling = null;
@@ -109,11 +106,9 @@ export default class SourceConsumptionAgent {
     const warningLength = Options.Get.MaxBacklogWarningByteLength(distributor);
 
     if (transferrer.pendingByteLength > warningLength) {
-      const event = new Event.Warn('backlog', {
+      distributor[$I.WARN]('backlog', {
         byteLength: transferrer.pendingByteLength,
       });
-
-      distributor.dispatchEvent(event);
     }
   }
 }

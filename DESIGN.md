@@ -119,7 +119,7 @@ graph TD
 | `AbstractTransferrer`          | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE` / `$I.DROP`，读侧位置门与队列计数                                        |
 | `ChunkStash`                   | 共享内存缓冲容器——聚合 chunk，写面为受保护生命周期（push/setDone/drop），读侧公开                                                                      |
 | `ForkedReadableStream`         | 拷贝流（内部类）——`ReadableStream` 子类；`pull` 驱动自己的 ChunkReader                                                                                 |
-| `SourceReader`                 | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态），不含调度                                                                        |
+| `SourceReader`                 | 分发器侧拉取装置——包住单流 source reader 的设备角色（读一块、闩终态、源侧失败在此派发），不含调度                                                      |
 | `SourceConsumptionAgent`       | 源流消费代理（内部类）——统筹调度（拉不拉、并发合并 single-flight、背压）与落点；按目标判定要不要碰源、拉一块、再按相位落点；与分发器 1:1，全 fork 共享 |
 | `ForkedReadableStreamRegistry` | fork 活体注册表（内部协作类）——`add(fork)` 入册、可遍历供降级换读器、fork 出口 `prune(fork)` 出表（成员资格 = 降级交接名单，无扫描清理）               |
 
@@ -237,7 +237,8 @@ classDiagram
 - `SourceReader` 与拷贝流无直接连线：拷贝只读自己的 ChunkReader，
   不接触 source（见「背压」）。它在构造时即锁死源，并独占其整个生命
   周期（永不 `releaseLock()`）：给分发器的源归它所有，直到分发器对象
-  死亡；`stream.locked` 恒为 true 就是对外可见的所有权外观。
+  死亡；`stream.locked` 恒为 true 就是对外可见的所有权外观。它也只持
+  `distributor` 一个引用（唯一用途：在发生处派收摊失败）。
 - `SourceConsumptionAgent` 与分发器 1:1（构造器里就建），被所有拷贝
   读取器共享：读取器只对它喊一句 `ensure`，"拉不拉、拉到哪、落到哪"全在
   它手里。它只有 `distributor` 一个引用，且不进包入口。
@@ -701,8 +702,9 @@ sequenceDiagram
 
 - 内存缓冲当前字节 / 块数：`$I.CHUNK_STASH`（ChunkStash）的
   `byteLength` / `length`，由缓冲容器自管。
-- 源侧终局：`I.SOURCE_READER`（SourceReader）的 `done` / `error` /
-  `cancelled`——源到头 / 源出错 / 我们收摊，三个终局互斥穷尽。
+- 源侧终局：`I.SOURCE_READER`（SourceReader）的 `done` / `cancelled`
+  ——源到头 / 我们收摊，两个终局互斥穷尽；源错不是位，它只以拒绝与
+  `warn('source-read-failed')` 存在。
 - 终止原因：`$I.TERMINATION`（未终结为 `null`，否则是那个 `AbortError`，
   拷贝流的 `error` 就是它）。
 - 当前活跃 fork 集合：`$I.FORKED_READABLE_STREAM_REGISTRY`（内部 `size`）。
@@ -720,10 +722,12 @@ sequenceDiagram
 | `terminate` | 分发器可用性终结被调用    |
 | `warn`      | 可恢复异常与观测信号      |
 
-源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。`warn` 的
-code 现在有九个：`backlog` / `close-failed` / `drop-failed` / `dump-failed` /
+源流正常结束（源出错已有 `warn('source-read-failed')` 兜着）、全部 fork
+离开等更细粒度事件尚未实现，属规划。`warn` 的
+code 现在有十个：`backlog` / `close-failed` / `drop-failed` / `dump-failed` /
 `initialize-failed` / `pull-failed` / `read-failed` / `seek-failed` /
-`source-cancel-failed`（载荷随 code；框架不装默认处理器，宿主自己接）。
+`source-cancel-failed` / `source-read-failed`（载荷随 code；框架不装默认
+处理器，宿主自己接）。
 `destroy()`（强档）不另派事件：它是
 宿主动作，调用方本来就知道——收摊何时完成看它返回的那个 Promise。
 

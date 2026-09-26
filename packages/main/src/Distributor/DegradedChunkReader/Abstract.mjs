@@ -1,7 +1,6 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as ChunkReader from '../ChunkReader/index.mjs';
-import * as Event from '../Event.mjs';
 import { I, $I, _I, _S, A } from './_Symbol.mjs';
 import { TRANSFERRER, DISTRIBUTOR, _A } from './_External.mjs';
 
@@ -41,7 +40,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
       await this[_I.INITIALIZE]();
       await this[I.SYNC]();
     } catch (cause) {
-      distributor.dispatchEvent(new Event.Warn('initialize-failed', cause));
+      distributor[DISTRIBUTOR.$I.WARN]('initialize-failed', cause);
       throw cause;
     }
   }
@@ -60,7 +59,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
         count++;
       }
     } catch (cause) {
-      distributor.dispatchEvent(new Event.Warn('seek-failed', cause));
+      distributor[DISTRIBUTOR.$I.WARN]('seek-failed', cause);
       throw cause;
     }
 
@@ -78,7 +77,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     Promise.resolve()
       .then(() => this[_I.CLOSE]())
       .catch((cause) => {
-        distributor.dispatchEvent(new Event.Warn('close-failed', cause));
+        distributor[DISTRIBUTOR.$I.WARN]('close-failed', cause);
       });
   }
 
@@ -108,7 +107,7 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
     try {
       result = await this[_I.READ]();
     } catch (cause) {
-      distributor.dispatchEvent(new Event.Warn('read-failed', cause));
+      distributor[DISTRIBUTOR.$I.WARN]('read-failed', cause);
       throw cause;
     }
 

@@ -23,6 +23,7 @@ const $I_CHUNK_STASH = Symbol('.$chunkStash');
 const $I_TERMINATION = Symbol('.$termination');
 const $I_TRANSFERRER = Symbol('.$transferrer');
 const $I_DEGRADE = Symbol('.$degrade()');
+const $I_WARN = Symbol('.$warn()');
 const $I_FORKED_READABLE_STREAM_REGISTRY = Symbol(
   '.$forkedReadableStreamRegistry',
 );
@@ -36,6 +37,7 @@ export const $I = deepFreeze({
   TERMINATION: $I_TERMINATION,
   TRANSFERRER: $I_TRANSFERRER,
   DEGRADE: $I_DEGRADE,
+  WARN: $I_WARN,
   DESTROYED: $I_DESTROYED,
   DESTROY: $I_DESTROY,
 });

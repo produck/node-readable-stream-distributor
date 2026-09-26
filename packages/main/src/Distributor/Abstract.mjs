@@ -38,7 +38,7 @@ class ReadableStreamDistributor extends EventTarget {
     Options.install(this);
 
     this[I.CTOR] = new.target;
-    this[A.I.SOURCE] = new SourceReader.Concrete(source);
+    this[A.I.SOURCE] = new SourceReader.Concrete(this, source);
     this[A.$I.AGENT] = new SourceConsumptionAgent(this);
   }
 
@@ -56,6 +56,10 @@ class ReadableStreamDistributor extends EventTarget {
 
   async [I.INITIALIZE_READER](reader, progress) {
     await reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](progress).catch(noop);
+  }
+
+  [$I.WARN](code, payload) {
+    this.dispatchEvent(new Event.Warn(code, payload));
   }
 
   fork() {
@@ -92,7 +96,7 @@ class ReadableStreamDistributor extends EventTarget {
     }
 
     transferrer[TRANSFERRER.$I.DUMP](stash).catch((cause) => {
-      this.dispatchEvent(new Event.Warn('dump-failed', cause));
+      this[$I.WARN]('dump-failed', cause);
     });
 
     this[$I.TRANSFERRER] = transferrer;
@@ -159,9 +163,7 @@ class ReadableStreamDistributor extends EventTarget {
       registry.prune(forked);
     }
 
-    await this[A.I.SOURCE].cancel(termination).catch((cause) => {
-      this.dispatchEvent(new Event.Warn('source-cancel-failed', cause));
-    });
+    await this[A.I.SOURCE].cancel(termination).catch(noop);
 
     await this[A.$I.AGENT].pullingSettled;
 
@@ -176,7 +178,7 @@ class ReadableStreamDistributor extends EventTarget {
 
       // Not awaited: a hanging release must not drag the teardown along.
       transferrer[TRANSFERRER.$I.DROP]().catch((cause) => {
-        this.dispatchEvent(new Event.Warn('drop-failed', cause));
+        this[$I.WARN]('drop-failed', cause);
       });
     }
   }

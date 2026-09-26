@@ -98,7 +98,7 @@ describe('ForkedReadableStream', () => {
         await assert.rejects(drain(distributor.fork()), cause);
       });
 
-      it('should dispatch warn(pull-failed) for a source failure', async () => {
+      it('should dispatch warn(source-read-failed) then warn(pull-failed)', async () => {
         const cause = new Error('the source failed');
         const warns = [];
         const source = new ReadableStream({
@@ -116,9 +116,10 @@ describe('ForkedReadableStream', () => {
 
         assert.deepEqual(
           warns.map((warn) => warn.code),
-          ['pull-failed'],
+          ['source-read-failed', 'pull-failed'],
         );
         assert.equal(warns[0].payload, cause);
+        assert.equal(warns[1].payload, cause);
       });
 
       it('should dispatch warn(read-failed) when the medium read throws', async () => {
