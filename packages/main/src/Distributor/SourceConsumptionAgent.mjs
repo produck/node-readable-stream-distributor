@@ -52,9 +52,6 @@ export default class SourceConsumptionAgent {
   }
 
   async pull() {
-    // TODO: review the foreign read here: a source failure rejects this pull
-    //   and therefore every waiting copy, and the chunk shape is never
-    //   validated before both stores do byteLength arithmetic on it.
     const { value, done } = await this.distributor[A.I.SOURCE].read();
 
     if (this.distributor.degraded) {
@@ -71,7 +68,7 @@ export default class SourceConsumptionAgent {
 
   degradeIfNeeded() {
     const { distributor } = this;
-    const stash = distributor[A.I.STASH];
+    const stash = distributor[A.$I.STASH];
 
     if (stash.byteLength <= Options.Get.MaxStashByteLength(distributor)) {
       return;
@@ -86,7 +83,7 @@ export default class SourceConsumptionAgent {
 
   toStash(chunk, done) {
     const { distributor } = this;
-    const stash = distributor[A.I.STASH];
+    const stash = distributor[A.$I.STASH];
 
     if (done) {
       return void stash[_A.STASH.$I.SET_DONE]();

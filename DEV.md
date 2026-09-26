@@ -36,6 +36,7 @@
 - 唯一的代价（不会自己守住）：**键名是两份账**——底层键改名时别名键
   不会跟着动，而别名仍能引用到旧符号。所以改名要两边一起改。
 - 层级：`I`/`S` = 实例/静态私有；`$I`/`$S` = 受保护；`_I`/`_S` = 抽象。
+  **跨家族要读的一律用受保护级**（读者家族读的 agent 与 stash 因此落在 `$I`）。
 - 方法符号带 `()` 后缀（`.$read()`、`._seek()`）；字段符号不带
   （`.$consumedChunkCount`）；描述符：实例 `.#*` / `.$*` / `._*`，静态 `S.*`。
 - `index.mjs` **只导出类**（`Concrete` / `Abstract`；降级家族再带
@@ -51,11 +52,12 @@
 - **两个表文件分工**：`_Symbol.mjs` 只定义自己的表（纯叶子，不引用任
   何东西）并出别名 `A`；对外的表单独放 `_External.mjs`，在那里导入并
   转发（`export * as CHUNK_READER from '../ChunkReader/_Symbol.mjs'`），
-  并出别名 `_A`。现转发：`ForkedReadableStream` →`DISTRIBUTOR`+
-  `CHUNK_READER`；`BufferChunkReader` →`CHUNK_READER`；降级族 →
-  `TRANSFERRER`+`CHUNK_READER`；写侧 →`CHUNK_STASH`。
+  并出别名 `_A`。现转发：`ChunkReader` →`DISTRIBUTOR`；
+  `BufferChunkReader` →`CHUNK_READER`+`DISTRIBUTOR`；
+  `ForkedReadableStream` →`DISTRIBUTOR`+`CHUNK_READER`；降级族 →
+  `TRANSFERRER`+`CHUNK_READER`+`DISTRIBUTOR`；写侧 →`CHUNK_STASH`。
 - **两个别名各管一摊**：`A`（自己的符号，在 `_Symbol.mjs`）——长键的
-  短名（`A.I.AGENT` / `A.$I.CONSUMED_COUNT` / `A.I.CTOR.READER.CURRENT`…）；
+  短名（`A.$I.AGENT` / `A.$I.CONSUMED_COUNT` / `A.I.CTOR.READER.CURRENT`…）；
   `_A`（借来的表，在 `_External.mjs`）——`_A.STASH` / `_A.READER` /
   `_A.BUFFER` / `_A.DEGRADED` / `_A.FORKED`。消费侧一眼分出“我的符号”与
   “外面借的”。
@@ -74,7 +76,7 @@
   按名从 `_External.mjs` 导入即可（写侧 `TRANSFERRER.$I.DUMP`——名字本身
   已经够短，套一层别名只是多一层）。
 - **局部别名 vs 内联**：一行放不下时起局部别名
-  （`const stash = this[A.I.STASH]`）而不是自行折行；但**实参位置别内联**
+  （`const stash = this[A.$I.STASH]`）而不是自行折行；但**实参位置别内联**
   ——把一个 `this[…]` 拼进多参调用里，prettier 会把实参逐行展开，反而
   多占行、也更难读。判据：内联后整行仍 ≤80 列才收（`printWidth`）。
 - 环检查 `logs/check-import-cycles.mjs`：34 个模块，强连通分量 0。
@@ -124,8 +126,8 @@
 - **`fork` 的 `label` 参数已废弃（2026-09-24）**：`fork()` 不再收助记符，
   `I.LABEL` 与该构造参数一并删——它写进去但从没被读过，不进事件也不进
   统计，留着只是死状态。
-- 内部：`I.SOURCE_READER`（唯一 source 消费者）· `I.CHUNK_STASH`（共享
-  `ChunkStash`）· `I.SOURCE_CONSUMPTION_AGENT`（消费代理）·
+- 内部：`I.SOURCE_READER`（唯一 source 消费者）· `$I.CHUNK_STASH`（共享
+  `ChunkStash`）· `$I.SOURCE_CONSUMPTION_AGENT`（消费代理）·
   `$I.FORKED_READABLE_STREAM_REGISTRY`
   （fork 注册表，fork 出口自清理也要读）· `$I.TERMINATION`（未终结为
   `null`，否则是终止原因；只剩 `fork()` 闸门与 `destroy()` 的取消读它）·
@@ -438,11 +440,16 @@
 
 - 分叉：内存路径 `BufferChunkReader`（直接读共享 `ChunkStash`）与降级
   家族（`AbstractDegradedChunkReader` + 具体介质侧实现）。
+- **读器只持一个保护级分发器成员**（2026-09-26 改）：`agent` / `stash` /
+  介质实例都不再是字段——各方法按需从它解构（`ENSURE_THEN_READ` 解出
+  `agent`，`chunkStash` / `transferrer` 是从它取的 getter）。读器因此
+  **手里有分发器**，宿主模板成员在发生处就能派事件（见「异常面」），
+  不必再借上一层代报。
 
 #### 基类 AbstractChunkReader = "有位置的读头"
 
-- `$I`：`CONSUMED_CHUNK_COUNT` / `CHUNK_STASH` / `READ` /
-  `ENSURE_THEN_READ`；`_I`：`READ`；无字符串键成员（位置与 stash 全走 `$I`）。
+- 表：`I.DISTRIBUTOR`（唯一持有的引用）· `$I.CONSUMED_CHUNK_COUNT` /
+  `$I.READ` / `$I.ENSURE_THEN_READ` / `$I.CLOSE` · `_I.READ`；无字符串键成员。
 - `$I.READ`（单纯读）：`_I.READ()` → 介质侧报非终态才
   `CONSUMED_CHUNK_COUNT++` → 原样返回读结果；`done` 的含义不在这里
   （见「读路径」）。
@@ -450,7 +457,8 @@
   `$I.READ()`；分发流的 `pull` 走这条。
 - 基类**不认识相位**：内存 → 介质这一层不写在通用读路径里——接替是内存族
   自己的事（见下）。
-- 不持初始化/关闭（已迁降级家族）；构造直接收 `chunkStash`（不包对象）。
+- 不持初始化/关闭（已迁降级家族）；**只存一个保护级分发器成员**，构造签名
+  就只有它。
 
 #### BufferChunkReader（内存 · 即时读）
 
@@ -485,10 +493,12 @@
   落地）→ `_I.INITIALIZE` 打开介质 → `I.SYNC()` 进度同步（只能走到介质
   当时能到的地方）。**失败就是链体 reject**（2026-09-25 改）：不再存进
   `I.ERROR`——那份状态随本次改动一并删，判据只留一处。两个观测点：
-  分发器的 `I.INITIALIZE_READER` 等这条 promise，catch 到就派
-  `warn('initialize-failed', cause)`（发起那一刻即可见）；需要介质的
-  那一读在 `I.READ_BACK` 的 `await this[I.INITIALIZED]` 上拿到同一个
-  cause（只吃队列的读者不受影响，它们根本不 await 这条链）。
+  链体自己 catch 到就派 `warn('initialize-failed', cause)` 再原样抛出
+  （2026-09-26 下移到读器：报告留在发生处）；需要介质的那一读在
+  `I.READ_BACK` 的 `await this[I.INITIALIZED]` 上拿到同一个 cause。
+  分发器的 `I.INITIALIZE_READER` 只剩“播种 + 吞”——播种是即发即弃，
+  没人接的拒绝会变成未处理拒绝（只吃队列的读者照旧不受影响，它们根本
+  不 await 这条链）。
   宿主侧 open / 定位失败走这一支，
   框架侧 dump 失败则由门 `$I.WAIT_POSITION` 先抛（带的是原始 cause）；
   实测 `logs/probe-read-back-guard.mjs`：宿主侧失败时宿主 `_I.READ` 调用
@@ -503,9 +513,11 @@
 - **分发器是唯一调用者**（同一 tick：构造 → 播种 → 交接）；无守卫——
   链体的每个 `await` 都在播种之后，读路径拿到的一定是就位点。
 - `$I.CLOSE`（**键归基类**，降级族覆盖同一个键）：`I.CLOSED` 幂等 →
-  **发起式**调 `_I.CLOSE`（返回值只用来吞掉拒绝，**不** `await
-I.INITIALIZED`）——链体里第一句就是等 `get dumping`，而 `dumping` 在
-  死盘上永不落地，等它就会把收摊一起挂住；`get closed` 暴露状态。
+  **发起式**调 `_I.CLOSE`——**同步抛也经 promise 转手**，失败派
+  `warn('close-failed', cause)`（2026-09-26：不再静默吞；若让它逃出去，
+  destroy 的遍历会被打断）。**不** `await I.INITIALIZED`：链体里第一句
+  就是等 `get dumping`，而 `dumping` 在死盘上永不落地，等它就会把收摊
+  一起挂住；`get closed` 暴露状态。
   内存族的 close 是基类**空实现**（无资源），所以 `destroy()` 对两相
   都能用同一句话关。
 
@@ -765,6 +777,37 @@ own resources` 守着）。**drain 同样不等**：死盘会让 `dumping` 永�
   回引，构成双向强引用——只要消费者还握着任一 fork，整条图（源读器、
   stash 及其字节、源流）都不可回收。“最后一个 fork 被丢弃”是分发器
   可回收的前提。
+
+### 异常面（四类归属，2026-09-26 判）
+
+- **平台保证**（尊重、不兜底）：源是**本 realm 真流**，`read()` 的形状、
+  `cancel()` 兑现在途读、已 error 的流对新读立即拒绝都是规范；`controller`
+  在已取消 / 已 error 的流上抛、async `pull` 的拒绝被平台吞（已实测）也都
+  是平台契约。
+- **宿主自己抛的异常 ⇒ 放行**（不吞、不翻译）：Options 取值器 · 宿主类的构造器
+  与静态成员（`new TransferrerImpl(...)` / `_S.PARSE_ARGUMENTS`，后者常带
+  Transferrer 开发者给最终用户的自定义异常）· 降级读者的
+  `_I.INITIALIZE` / `_I.SEEK` / `_I.READ` / `_I.CLOSE` · 介质的
+  `_I.WRITE` / `_I.DUMP` / `_I.DROP` · 非 Buffer 的 chunk。**校验口例外**：
+  `Checker` 只出判词、不抛。
+- **构造器抛的后果**（2026-09-26 定）：它落在某一趟 pull 里 ⇒ 那趟 pull
+  失败（异常照旧到读侧 + 派 `pull-failed`），而 `$I.TRANSFERRER` 未落位 ⇒
+  `degraded` 仍 `false`，下一趟 pull 照旧重试切换（不锁死）。
+- **报告点跟着发生处**（2026-09-26）：降级读者的四个宿主模板成员在**调用
+  现场**派事件，派发器就是分发器（读器构造时就拿到了它）：
+  `_I.INITIALIZE` → `initialize-failed` · `_I.SEEK` → `seek-failed` ·
+  `_I.READ` → `read-failed` · `_I.CLOSE` → `close-failed`（同步抛也经
+  promise 转手）。前三个**报完照旧抛出**（控制流不变）；`close-failed`
+  是即发即弃，只报不抛。
+- **能力受限才上移一层**（介质侧拿不到分发器，或调用方是唯一观测者）：
+  `dump-failed` / `drop-failed`（介质模板成员，由 `$I.DEGRADE` 与
+  `$I.DESTROY` 代派）· `source-cancel-failed`（平台 `cancel()`，由
+  `$I.DESTROY` 代派）。
+- **重复上报不去抖**：与 `backlog` 同族——一个因（dump 被拒）可以让每个
+  降级 reader 各派一条 `initialize-failed`；闩住的介质错误会让之后每趟消费
+  各派一条 `pull-failed`。水准信号，限频归宿主。
+- **漏斗唯一**：所有内向失败统一从拷贝流的 `read()` 抛出并拒该拷贝（监听器
+  抛不在此列，已实测）。
 
 ## 术语
 

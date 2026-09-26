@@ -136,10 +136,13 @@ export declare namespace Event {
 
   type WarnDetail =
     | { code: 'backlog'; payload: { byteLength: number } }
+    | { code: 'close-failed'; payload: unknown }
     | { code: 'drop-failed'; payload: unknown }
     | { code: 'dump-failed'; payload: unknown }
     | { code: 'initialize-failed'; payload: unknown }
     | { code: 'pull-failed'; payload: unknown }
+    | { code: 'read-failed'; payload: unknown }
+    | { code: 'seek-failed'; payload: unknown }
     | { code: 'source-cancel-failed'; payload: unknown };
 
   type WarnCode = WarnDetail['code'];

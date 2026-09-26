@@ -1,8 +1,9 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import * as ChunkReader from '../ChunkReader/index.mjs';
+import * as Event from '../Event.mjs';
 import { I, $I, _I, _S, A } from './_Symbol.mjs';
-import { TRANSFERRER, _A } from './_External.mjs';
+import { TRANSFERRER, DISTRIBUTOR, _A } from './_External.mjs';
 
 class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   [I.CLOSED] = false;
@@ -10,12 +11,9 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   [A.I.SEEKED_COUNT] = 0;
 
   get chunkStash() {
-    return this[_A.READER.A.$I.STASH];
-  }
+    const distributor = this[_A.READER.A.I.DISTRIBUTOR];
 
-  constructor(agent, stash, transferrer) {
-    super(agent, stash);
-    this[$I.TRANSFERRER] = transferrer;
+    return distributor[DISTRIBUTOR.A.$I.STASH];
   }
 
   get closed() {
@@ -23,7 +21,9 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   get transferrer() {
-    return this[$I.TRANSFERRER];
+    const distributor = this[_A.READER.A.I.DISTRIBUTOR];
+
+    return distributor[DISTRIBUTOR.$I.TRANSFERRER];
   }
 
   [$I.REQUEST_INITIALIZE](progress) {
@@ -34,26 +34,34 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   async [I.INITIALIZE]() {
-    // TODO: review the per-reader report: a refused dump rejects this chain
-    //   too, so every reader adds its own warn('initialize-failed').
-    await this[$I.TRANSFERRER].dumping;
-    await this[_I.INITIALIZE]();
-    await this[I.SYNC]();
+    const distributor = this[_A.READER.A.I.DISTRIBUTOR];
+
+    try {
+      await this.transferrer.dumping;
+      await this[_I.INITIALIZE]();
+      await this[I.SYNC]();
+    } catch (cause) {
+      distributor.dispatchEvent(new Event.Warn('initialize-failed', cause));
+      throw cause;
+    }
   }
 
   async [I.SYNC]() {
+    const distributor = this[_A.READER.A.I.DISTRIBUTOR];
     const target = this[_A.READER.A.$I.CONSUMED_COUNT];
     let count = this[A.I.SEEKED_COUNT];
 
-    while (count < target) {
-      // TODO: review the two routes of a host seek failure: rejecting the
-      //   initialize chain (reported to the distributor), or rejecting the
-      //   copy when SYNC runs from a read.
-      if (!(await this[_I.SEEK]())) {
-        break;
-      }
+    try {
+      while (count < target) {
+        if (!(await this[_I.SEEK]())) {
+          break;
+        }
 
-      count++;
+        count++;
+      }
+    } catch (cause) {
+      distributor.dispatchEvent(new Event.Warn('seek-failed', cause));
+      throw cause;
     }
 
     this[A.I.SEEKED_COUNT] = count;
@@ -64,13 +72,18 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
       return;
     }
 
+    const distributor = this[_A.READER.A.I.DISTRIBUTOR];
+
     this[I.CLOSED] = true;
-    // TODO: review the silent swallow: a host close failure has no observer.
-    Promise.resolve(this[_I.CLOSE]()).catch(() => {});
+    Promise.resolve()
+      .then(() => this[_I.CLOSE]())
+      .catch((cause) => {
+        distributor.dispatchEvent(new Event.Warn('close-failed', cause));
+      });
   }
 
   async [_A.READER._I.READ]() {
-    const transferrer = this[$I.TRANSFERRER];
+    const transferrer = this.transferrer;
     const position = this[_A.READER.A.$I.CONSUMED_COUNT];
 
     await transferrer[TRANSFERRER.$I.WAIT_POSITION](position);
@@ -85,12 +98,19 @@ class AbstractDegradedChunkReader extends ChunkReader.Abstract {
   }
 
   async [I.READ_BACK]() {
+    const distributor = this[_A.READER.A.I.DISTRIBUTOR];
+
     await this[I.INITIALIZED];
     await this[I.SYNC]();
 
-    // TODO: review a host read that throws, rejects, or answers outside the
-    //   declared result shape: it rejects this copy's stream.
-    const result = await this[_I.READ]();
+    let result;
+
+    try {
+      result = await this[_I.READ]();
+    } catch (cause) {
+      distributor.dispatchEvent(new Event.Warn('read-failed', cause));
+      throw cause;
+    }
 
     if (!result.done) {
       this[A.I.SEEKED_COUNT]++;

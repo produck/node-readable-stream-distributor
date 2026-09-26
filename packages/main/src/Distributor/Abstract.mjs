@@ -15,10 +15,12 @@ import * as Options from './Options/index.mjs';
 import { I, $I, _S, A } from './_Symbol.mjs';
 import { _A, TRANSFERRER } from './_External.mjs';
 
+const noop = () => {};
+
 const TERMINATION_MESSAGE = 'The distributor has been terminated';
 
 class ReadableStreamDistributor extends EventTarget {
-  [A.I.STASH] = new ChunkStash.Concrete();
+  [A.$I.STASH] = new ChunkStash.Concrete();
   [A.$I.REGISTRY] = new ForkedReadableStreamRegistry();
   [$I.TERMINATION] = null;
   [I.TRANSFERRER_ARGS] = [];
@@ -37,7 +39,7 @@ class ReadableStreamDistributor extends EventTarget {
 
     this[I.CTOR] = new.target;
     this[A.I.SOURCE] = new SourceReader.Concrete(source);
-    this[A.I.AGENT] = new SourceConsumptionAgent(this);
+    this[A.$I.AGENT] = new SourceConsumptionAgent(this);
   }
 
   get options() {
@@ -53,11 +55,7 @@ class ReadableStreamDistributor extends EventTarget {
   }
 
   async [I.INITIALIZE_READER](reader, progress) {
-    try {
-      await reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](progress);
-    } catch (cause) {
-      this.dispatchEvent(new Event.Warn('initialize-failed', cause));
-    }
+    await reader[_A.DEGRADED.$I.REQUEST_INITIALIZE](progress).catch(noop);
   }
 
   fork() {
@@ -65,11 +63,8 @@ class ReadableStreamDistributor extends EventTarget {
       Ow.Error.Common('Distributor has been terminated');
     }
 
-    const agent = this[A.I.AGENT];
-    const stash = this[A.I.STASH];
-    const transferrer = this[$I.TRANSFERRER];
     const ChunkReaderImpl = this[A.I.CTOR.READER.CURRENT];
-    const reader = new ChunkReaderImpl(agent, stash, transferrer);
+    const reader = new ChunkReaderImpl(this);
 
     if (ChunkReaderImpl === this[A.I.CTOR.READER.DEGRADED]) {
       this[I.INITIALIZE_READER](reader, 0);
@@ -88,8 +83,7 @@ class ReadableStreamDistributor extends EventTarget {
       [A.I.CTOR.TRANSFERRER]: TransferrerImpl,
     } = this;
 
-    const agent = this[A.I.AGENT];
-    const stash = this[A.I.STASH];
+    const stash = this[A.$I.STASH];
     const { byteLength } = stash;
     const transferrer = new TransferrerImpl(...this[I.TRANSFERRER_ARGS]);
 
@@ -105,7 +99,7 @@ class ReadableStreamDistributor extends EventTarget {
     this[A.I.CTOR.READER.CURRENT] = DegradedChunkReaderImpl;
 
     for (const [forked] of this[A.$I.REGISTRY]) {
-      const reader = new DegradedChunkReaderImpl(agent, stash, transferrer);
+      const reader = new DegradedChunkReaderImpl(this);
       const bufferChunkReader = forked[_A.FORKED.A.$I.READER];
       const progress = bufferChunkReader[_A.READER.A.$I.CONSUMED_COUNT];
 
@@ -169,10 +163,10 @@ class ReadableStreamDistributor extends EventTarget {
       this.dispatchEvent(new Event.Warn('source-cancel-failed', cause));
     });
 
-    await this[A.I.AGENT].pullingSettled;
+    await this[A.$I.AGENT].pullingSettled;
 
     const transferrer = this[$I.TRANSFERRER];
-    const stash = this[A.I.STASH];
+    const stash = this[A.$I.STASH];
 
     if (transferrer === null) {
       stash[_A.STASH.$I.SET_DONE]();

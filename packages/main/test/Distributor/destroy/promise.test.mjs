@@ -182,4 +182,32 @@ describe('>promise', () => {
     );
     assert.equal(warns[0].payload, cause);
   });
+
+  it('should dispatch warn(close-failed) when the medium refuses to close', async () => {
+    const cause = new Error('the medium refuses to close');
+
+    class RefusingCloseReader extends TestDegradedChunkReader {
+      [READER.CLOSE]() {
+        throw cause;
+      }
+    }
+
+    const family = makeFamily({ reader: RefusingCloseReader });
+    const distributor = new family.Distributor(makeSource(['a', 'b']));
+    const warns = [];
+
+    distributor.addEventListener('warn', (event) => warns.push(event.detail));
+
+    Options.Tune.MaxStashByteLength(distributor, 0);
+
+    await distributor.fork().getReader().read();
+    await distributor.destroy();
+    await settle();
+
+    assert.deepEqual(
+      warns.map((warn) => warn.code),
+      ['close-failed'],
+    );
+    assert.equal(warns[0].payload, cause);
+  });
 });

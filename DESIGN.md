@@ -113,7 +113,7 @@ graph TD
 | 模块                           | 职责                                                                                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ReadableStreamDistributor`    | 抽象类——多拷贝分发，引用计数，策略切换。阈值是构造参数（默认 `1GiB`），落受保护字段                                                                    |
-| `AbstractChunkReader`          | 拷贝侧读取抽象——受保护 `$I.CHUNK_STASH` 持共享 stash；进度与前沿驱动（`$I.ENSURE_THEN_READ` → `$I.READ` → `_I.READ`）                                  |
+| `AbstractChunkReader`          | 拷贝侧读取抽象——受保护 `I.DISTRIBUTOR` 持分发器（`agent` / `stash` 按需取）；进度与前沿驱动（`$I.ENSURE_THEN_READ` → `$I.READ` → `_I.READ`）           |
 | `BufferChunkReader`            | 内存阶段——直接消费共享 `ChunkStash`，按 index 读取                                                                                                     |
 | `AbstractDegradedChunkReader`  | 降级家族抽象——纯读；初始化屏障与 `close`；写侧类由 `_S.TRANSFERRER_CTOR`（家族）声明，实例由分发器降级时构造并交接                                     |
 | `AbstractTransferrer`          | 降级家族写侧内部抽象——介质中性的受保护 `$I.DUMP` / `$I.WRITE` / `$I.SET_DONE` / `$I.DROP`，读侧位置门与队列计数                                        |
@@ -231,9 +231,9 @@ classDiagram
   `EventTarget` / `ReadableStream` 为基类，继承自平台而非本模块。
 - `ForkedReadableStream` 与 `AbstractChunkReader` 是 1:1——每个拷贝
   持有自己的读取器，进度（受保护 `$I.CONSUMED_CHUNK_COUNT`）天然 per-fork。
-- `ChunkStash` 由分发器持有并注入每个 `AbstractChunkReader`（受保护
-  `$I.CHUNK_STASH`），因此所有拷贝读取器共享同一份；`BufferChunkReader`
-  经同一个符号按 index 读取。它是当前唯一的 chunk 载体。
+- `ChunkStash` 由分发器持有，读取器各自按需从分发器取（受保护
+  `I.DISTRIBUTOR`），因此所有拷贝读取器共享同一份；`BufferChunkReader`
+  也经它按 index 读取。它是当前唯一的 chunk 载体。
 - `SourceReader` 与拷贝流无直接连线：拷贝只读自己的 ChunkReader，
   不接触 source（见「背压」）。它在构造时即锁死源，并独占其整个生命
   周期（永不 `releaseLock()`）：给分发器的源归它所有，直到分发器对象
@@ -257,25 +257,33 @@ classDiagram
   - `index.mjs` + `_Symbol.mjs` + `_External.mjs`）；
 - **唯一特例：极端简化单文件**。无子类、无专属符号、无需独立导出
   入口的实现，可用单文件模式不建目录，平铺在与抽象类类目录平行的
-  位置，文件名即类名。当前有 `BufferChunkReader`、
-  `SourceConsumptionAgent` 采用
-  （`Distributor/BufferChunkReader.mjs`）。
+  位置，文件名即类名。当前只有 `SourceConsumptionAgent` 采用
+  （`Distributor/SourceConsumptionAgent.mjs`）；`BufferChunkReader`
+  有两个专属符号（`I.SUCCESSOR` / `$I.HANDOVER`）与自己的桥，所以
+  是目录。
 
 示例：
 
 ```text
 Distributor/
-  BufferChunkReader.mjs # AbstractChunkReader 子类（单文件特例）
+  BufferChunkReader/    # AbstractChunkReader 子类（内存路径；有专属符号与桥）
+    Concrete.mjs
+    index.mjs
+    _Symbol.mjs
+    _External.mjs
   ChunkReader/          # AbstractChunkReader（抽象类类目录）
     Abstract.mjs
     index.mjs
+    Parser.mjs
     _Symbol.mjs
+    _External.mjs
   DegradedChunkReader/  # 降级家族：AbstractDegradedChunkReader（纯读抽象，与 ChunkReader/ 平行）
     Abstract.mjs
     Transferrer/        # AbstractTransferrer（家族内部抽象：写侧 dump/write）
       Abstract.mjs
       index.mjs
       _Symbol.mjs
+      _External.mjs
     index.mjs
     _Symbol.mjs
     _External.mjs
@@ -285,6 +293,7 @@ Distributor/
     _Symbol.mjs
   ChunkStash/           # 内部类（向下扩展）
   ForkedReadableStream/ # 内部类（向下扩展）
+  SourceConsumptionAgent.mjs # 单文件特例：无子类、无专属符号、无独立导出
 ```
 
 ## 缓存文件格式
@@ -399,8 +408,9 @@ graph BT
 - `BufferChunkReader` 直接消费共享 `ChunkStash`（按 index 读，`done`
   由 `stash.length` 决定），是内存路径分支。
 - `AbstractDegradedChunkReader` 是降级读取器家族的抽象中间层，**纯读**：
-  - 实例经受保护 `$I.CHUNK_STASH` 持有共享 `chunkStash`（下游子类另开
-    `get chunkStash` / `get closed` 两个便利面）；读侧**不认识
+  - 实例只持分发器（受保护 `I.DISTRIBUTOR`）；共享 `chunkStash` 与写侧
+    `transferrer` 由 `get chunkStash` / `get transferrer` 按需取出，
+    `get closed` 暴露状态；读侧**不认识
     dump**，只认**接受度** `transferrer.$I.WAIT_POSITION(position)`：每次
     `read()` 先过门，队列里还在的位由抽象层直接交付；要走介质时先惰性
     初始化——策略要 open / 定位时介质必已存在；`close()` await 它。
@@ -689,7 +699,7 @@ sequenceDiagram
 
 **仓库内 / 调试**（经受保护符号，宿主拿不到）：
 
-- 内存缓冲当前字节 / 块数：`I.CHUNK_STASH`（ChunkStash）的
+- 内存缓冲当前字节 / 块数：`$I.CHUNK_STASH`（ChunkStash）的
   `byteLength` / `length`，由缓冲容器自管。
 - 源侧终局：`I.SOURCE_READER`（SourceReader）的 `done` / `error` /
   `cancelled`——源到头 / 源出错 / 我们收摊，三个终局互斥穷尽。
@@ -711,9 +721,9 @@ sequenceDiagram
 | `warn`      | 可恢复异常与观测信号      |
 
 源流结束 / 出错、全部 fork 离开等更细粒度事件尚未实现，属规划。`warn` 的
-code 现在有六个：`dump-failed` / `initialize-failed` / `backlog` /
-`pull-failed` / `drop-failed` / `source-cancel-failed`（载荷随 code；框架不装
-默认处理器，宿主自己接）。
+code 现在有九个：`backlog` / `close-failed` / `drop-failed` / `dump-failed` /
+`initialize-failed` / `pull-failed` / `read-failed` / `seek-failed` /
+`source-cancel-failed`（载荷随 code；框架不装默认处理器，宿主自己接）。
 `destroy()`（强档）不另派事件：它是
 宿主动作，调用方本来就知道——收摊何时完成看它返回的那个 Promise。
 

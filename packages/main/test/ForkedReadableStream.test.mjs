@@ -121,6 +121,103 @@ describe('ForkedReadableStream', () => {
         assert.equal(warns[0].payload, cause);
       });
 
+      it('should dispatch warn(read-failed) when the medium read throws', async () => {
+        const cause = new Error('the medium failed');
+
+        class BreakingReader extends TestDegradedChunkReader {
+          [READER.READ]() {
+            const result = super[READER.READ]();
+
+            if (result.value?.toString() === 'b') {
+              throw cause;
+            }
+
+            return result;
+          }
+        }
+
+        const family = makeFamily({ reader: BreakingReader });
+        const distributor = new family.Distributor(makeSource(['a', 'b']));
+        const warns = [];
+        const reader = distributor.fork().getReader();
+
+        distributor.addEventListener('warn', (event) => {
+          warns.push(event.detail);
+        });
+
+        Options.Tune.MaxStashByteLength(distributor, 0);
+        Options.Tune.MaxBacklogWarningByteLength(distributor, 1024);
+
+        await reader.read();
+        await assert.rejects(reader.read(), cause);
+
+        assert.deepEqual(
+          warns.map((warn) => warn.code),
+          ['read-failed'],
+        );
+        assert.equal(warns[0].payload, cause);
+      });
+
+      it('should dispatch warn(seek-failed) when the medium seek throws', async () => {
+        const cause = new Error('the medium seek failed');
+
+        class UnseekableReader extends TestDegradedChunkReader {
+          [READER.SEEK]() {
+            throw cause;
+          }
+        }
+
+        const family = makeFamily({ reader: UnseekableReader });
+        const distributor = new family.Distributor(makeSource(['a', 'b']));
+        const warns = [];
+        const reader = distributor.fork().getReader();
+
+        distributor.addEventListener('warn', (event) => {
+          warns.push(event.detail);
+        });
+
+        await reader.read();
+        Options.Tune.MaxStashByteLength(distributor, 0);
+
+        await assert.rejects(reader.read(), cause);
+
+        assert.deepEqual(
+          warns.map((warn) => warn.code),
+          ['seek-failed', 'initialize-failed'],
+        );
+        assert.equal(warns[0].payload, cause);
+      });
+
+      it('should dispatch warn(close-failed) when the medium refuses to close', async () => {
+        const cause = new Error('the medium refuses to close');
+
+        class RefusingCloseReader extends TestDegradedChunkReader {
+          [READER.CLOSE]() {
+            throw cause;
+          }
+        }
+
+        const family = makeFamily({ reader: RefusingCloseReader });
+        const distributor = new family.Distributor(makeSource(['a']));
+        const warns = [];
+        const forked = distributor.fork();
+
+        distributor.addEventListener('warn', (event) => {
+          warns.push(event.detail);
+        });
+
+        Options.Tune.MaxStashByteLength(distributor, 0);
+
+        await drain(forked);
+        await settle();
+
+        assert.deepEqual(
+          warns.map((warn) => warn.code),
+          ['close-failed'],
+        );
+        assert.equal(warns[0].payload, cause);
+      });
+
       it('should reject with the medium error it hit', async () => {
         const cause = new Error('the medium failed');
 

@@ -13,7 +13,6 @@ import {
   settle,
   TestDegradedChunkReader,
   TestDistributor,
-  TestTransferrer,
 } from '#test/baseline.mjs';
 
 import { A, $I } from '../src/Distributor/_Symbol.mjs';
@@ -23,49 +22,17 @@ const { _I: READER } = SYMBOL.DEGRADED_CHUNK_READER;
 
 describe('DegradedChunkReader', () => {
   describe('constructor()', () => {
-    it('should take the agent, the stash and the transferrer', () => {
+    it('should take the distributor', () => {
       const distributor = new TestDistributor(makeSource());
-      const reader = new TestDegradedChunkReader(
-        distributor[A.I.AGENT],
-        distributor[A.I.STASH],
-        new TestTransferrer(),
-      );
+      const reader = new TestDegradedChunkReader(distributor);
 
       assert.ok(reader instanceof DegradedChunkReader);
     });
 
     describe('>instance', () => {
-      it('should answer the stash it was given', () => {
-        const distributor = new TestDistributor(makeSource());
-        const stash = distributor[A.I.STASH];
-        const reader = new TestDegradedChunkReader(
-          distributor[A.I.AGENT],
-          stash,
-          new TestTransferrer(),
-        );
-
-        assert.equal(reader.chunkStash, stash);
-      });
-
-      it('should answer the transferrer it was given', () => {
-        const distributor = new TestDistributor(makeSource());
-        const medium = new TestTransferrer();
-        const reader = new TestDegradedChunkReader(
-          distributor[A.I.AGENT],
-          distributor[A.I.STASH],
-          medium,
-        );
-
-        assert.equal(reader.transferrer, medium);
-      });
-
       it('should start open', () => {
         const distributor = new TestDistributor(makeSource());
-        const reader = new TestDegradedChunkReader(
-          distributor[A.I.AGENT],
-          distributor[A.I.STASH],
-          new TestTransferrer(),
-        );
+        const reader = new TestDegradedChunkReader(distributor);
 
         assert.equal(reader.closed, false);
       });
@@ -83,7 +50,7 @@ describe('DegradedChunkReader', () => {
 
       const reader = forked[FORKED.I.READER];
 
-      assert.equal(reader.chunkStash, distributor[A.I.STASH]);
+      assert.equal(reader.chunkStash, distributor[A.$I.STASH]);
     });
   });
 

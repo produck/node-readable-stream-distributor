@@ -1,14 +1,14 @@
 import Abstract, { Member as M } from '@produck/es-abstract';
 
 import { $I, _I, A } from './_Symbol.mjs';
+import { DISTRIBUTOR } from './_External.mjs';
 import * as Parser from './Parser.mjs';
 
 class AbstractChunkReader {
   [A.$I.CONSUMED_COUNT] = 0;
 
-  constructor(agent, stash) {
-    this[A.I.AGENT] = agent;
-    this[A.$I.STASH] = stash;
+  constructor(distributor) {
+    this[A.I.DISTRIBUTOR] = distributor;
   }
 
   async [$I.READ]() {
@@ -22,7 +22,9 @@ class AbstractChunkReader {
   }
 
   async [$I.ENSURE_THEN_READ]() {
-    await this[A.I.AGENT].ensure(this[A.$I.CONSUMED_COUNT]);
+    const { [DISTRIBUTOR.A.$I.AGENT]: agent } = this[A.I.DISTRIBUTOR];
+
+    await agent.ensure(this[A.$I.CONSUMED_COUNT]);
 
     return this[$I.READ]();
   }

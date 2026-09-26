@@ -16,11 +16,9 @@ export const I = deepFreeze({
   READ_BACK: I_READ_BACK,
 });
 
-const $I_TRANSFERRER = Symbol('.$transferrer');
 const $I_REQUEST_INITIALIZE = Symbol('.$requestInitialize()');
 
 export const $I = deepFreeze({
-  TRANSFERRER: $I_TRANSFERRER,
   REQUEST_INITIALIZE: $I_REQUEST_INITIALIZE,
 });
 

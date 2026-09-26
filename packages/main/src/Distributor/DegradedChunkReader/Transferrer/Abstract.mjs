@@ -51,6 +51,8 @@ class AbstractTransferrer {
     this[I.PENDING_CHUNKS] = [...stash.chunks()];
 
     try {
+      // TODO: review the host dump call: a throw or a rejection is latched
+      //   here and answered to the caller.
       await this[_I.DUMP](stash);
     } catch (cause) {
       this[I.FAIL](cause);
@@ -82,6 +84,8 @@ class AbstractTransferrer {
         const buffer = this[I.PENDING_CHUNKS][0];
 
         try {
+          // TODO: review the host write call: a failure is latched here and
+          //   has no observer until a later pull replays it.
           await this[_I.WRITE](buffer);
         } catch (cause) {
           this[I.FAIL](cause);
@@ -98,8 +102,6 @@ class AbstractTransferrer {
   }
 
   [$I.WRITE](chunk) {
-    // TODO: review the resurfacing path: a medium failure latched earlier
-    //   rejects the pull that writes the next chunk.
     if (this[I.ERROR] !== null) {
       Ow.throw(this[I.ERROR]);
     }
@@ -121,8 +123,6 @@ class AbstractTransferrer {
 
     const accepted = await promise;
 
-    // TODO: review this surface: a latched medium failure reaches the waiting
-    //   copy here, as a rejection of its read.
     if (!accepted && this[I.ERROR] !== null) {
       Ow.throw(this[I.ERROR]);
     }
@@ -141,6 +141,8 @@ class AbstractTransferrer {
     this[I.DROPPED] = true;
     this[I.PENDING_CHUNKS] = [];
     this[I.PENDING_BYTE_LENGTH] = 0;
+    // TODO: review the host release call: its failure is answered to the
+    //   caller, which reports it without waiting.
     await this[_I.DROP]();
   }
 
