@@ -136,7 +136,19 @@
   换读器时置为前者）。受保护侧另有写侧实例 `$I.TRANSFERRER`，及其待用构造参数的
   **公开**入口 `setTransferrerArgs(...)`（落 `I.TRANSFERRER_ARGS`，经写侧家族的
   `_S.PARSE_ARGUMENTS` 归一——基类给了恒等默认，分发器自己不解释）。构造
-  校验 source 为未锁定的 WHATWG ReadableStream。
+  校验 source 为**本 realm** 的、未锁定的 WHATWG ReadableStream。
+- **源必须是本 realm 的 ReadableStream（2026-09-26 定）**：判定只剩
+  `value instanceof ReadableStream`；此前的鸭子型兼容面（`toStringTag` +
+  `locked` 是布尔 + `getReader` 是函数）已拆。理由不是风格：库里多处**依赖
+  真流的规范语义**（`locked` 恒真、`cancel()` 关流并兑现在途读、errored 流
+  对新读立即拒绝、reader 独占），鸭子型对象只是“看起来像”，通过了才是
+  坏消息——错误被推到运行期。判据仍**只出判词、不抛**：`instanceof` 对
+  本地 Proxy（含 revoked）会跑 `[[GetPrototypeOf]]` 陷阱，所以 `try` 留着，
+  抛就判 `false`。代价：跨 realm（iframe / worker / 另一 `vm` 上下文）的流
+  不再直接收，得先经适配层转成本地 `ReadableStream` 再传——“适配工具包”
+  另开一个包，与核心包分工干净。
+  实测口径：`logs/probe-checker-throw.mjs`（真流通过；鸭子型、revoked、
+  抛异常的访问器都判否）。
 - 共享 stash 由分发器 create/持有并注入各读取器；内容生命周期（`$I.PUSH()` /
   `$I.SET_DONE()`）归 `SourceConsumptionAgent`；dump→drop
   归写侧（`START_DUMPING` 成功自己 DROP），内存相的 drop 归 `destroy()`。
@@ -198,7 +210,11 @@
     当场**。
 - **两个位置的陷阱**（都实测过）：
   - 等在途 pull **必须在 `cancel` 之后**：在途的 `read()` 只有 cancel 能
-    解（源不再出声时它就一直挂着），放在前面 `destroy()` 直接死锁。
+    解（源不再出声时它就一直挂着），放在前面 `destroy()` 直接死锁。而
+    cancel 把它**兑现成 `{done:true}`**（规范），所以 destroy 期间那趟 pull
+    不可能因源拒——真要拒只可能来自切换那一步（宿主取值器 / 介质构造器），
+    用例 `should dispatch warn(pull-failed) for the in-flight pull` 走的就是
+    这条路径。
   - 在途 pull 的**结果要吞掉**（2026-09-25 改）：销毁只关心时机，
     `pullingSettled` 内部 `.catch(noop)`。不吞则整个异步段中断——封口与
     释放都不发生，`destroy()` 还返回一个拒绝的 Promise。**报不在这里**：

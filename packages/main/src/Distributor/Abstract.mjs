@@ -29,8 +29,8 @@ class ReadableStreamDistributor extends EventTarget {
   constructor(source) {
     super();
 
-    if (!Checker.isReadableStreamLike(source)) {
-      ThrowTypeError('source', 'a WHATWG ReadableStream');
+    if (!Checker.isReadableStream(source)) {
+      ThrowTypeError('source', 'a WHATWG ReadableStream of this realm');
     }
 
     Options.install(this);

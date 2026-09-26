@@ -106,47 +106,46 @@ describe('>promise', () => {
   });
 
   it('should dispatch warn(pull-failed) for the in-flight pull', async () => {
-    const cause = new Error('the source read failed');
+    const cause = new Error('the medium refused to open');
     const warns = [];
-    let fail = null;
-    const source = {
-      [Symbol.toStringTag]: 'ReadableStream',
-      locked: false,
-      getReader() {
-        return {
-          read() {
-            return new Promise((_, reject) => {
-              fail = reject;
-            });
-          },
-          cancel() {
-            return Promise.resolve();
-          },
-        };
+    const source = new ReadableStream({
+      start(controller) {
+        controller.enqueue(Buffer.from('a'));
       },
-    };
-    const distributor = new TestDistributor(source);
-    const aborted = distributor
-      .fork()
-      .getReader()
-      .read()
-      .catch((r) => r);
+      pull() {
+        return new Promise(() => {});
+      },
+    });
+
+    class RefusingOpenTransferrer extends TestTransferrer {
+      constructor() {
+        super();
+        throw cause;
+      }
+    }
+
+    const family = makeFamily({ medium: RefusingOpenTransferrer });
+    const distributor = new family.Distributor(source);
+    const reader = distributor.fork().getReader();
 
     distributor.addEventListener('warn', (event) => warns.push(event.detail));
 
-    await settle();
+    assert.equal((await reader.read()).value.toString(), 'a');
 
-    const destroying = distributor.destroy();
+    Options.Tune.MaxStashByteLength(distributor, 0);
+    Options.Tune.DegradeOnStashFullAndDone(distributor, true);
+
+    const aborted = reader.read().catch((r) => r);
 
     await settle();
-    fail(cause);
-    await destroying;
+    await distributor.destroy();
 
     assert.deepEqual(
       warns.map((warn) => warn.code),
       ['pull-failed'],
     );
     assert.equal(warns[0].payload, cause);
+    assert.equal(distributor.degraded, false);
 
     const failure = await aborted;
 

@@ -6,7 +6,7 @@ import { makeSource, TestDistributor } from '#test/baseline.mjs';
 const EXPECTED = {
   NOT_A_STREAM: {
     name: 'TypeError',
-    message: /Invalid "source", one "a WHATWG ReadableStream"/,
+    message: /Invalid "source", one "a WHATWG ReadableStream of this realm"/,
   },
   LOCKED: { message: /Source stream must not be locked/ },
 };
@@ -32,25 +32,31 @@ describe('constructor()', () => {
     reader.releaseLock();
   });
 
-  it('should accept a stream-like object', () => {
-    const like = {
-      [Symbol.toStringTag]: 'ReadableStream',
-      locked: false,
-      getReader() {},
-    };
-
-    assert.doesNotThrow(() => new TestDistributor(like));
-  });
-
-  it('should reject a stream-like object missing a member', () => {
+  it('should reject a stream-like object, whatever its members', () => {
     const cases = [
+      { [Symbol.toStringTag]: 'ReadableStream', locked: false, getReader() {} },
       { [Symbol.toStringTag]: 'ReadableStream', getReader() {} },
       { [Symbol.toStringTag]: 'ReadableStream', locked: false },
+      {
+        [Symbol.toStringTag]: 'ReadableStream',
+        get locked() {
+          throw new Error('the locked getter threw');
+        },
+        getReader() {},
+      },
     ];
 
     for (const like of cases) {
       assert.throws(() => new TestDistributor(like), EXPECTED.NOT_A_STREAM);
     }
+  });
+
+  it('should reject a revoked proxy', () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+
+    revoke();
+
+    assert.throws(() => new TestDistributor(proxy), EXPECTED.NOT_A_STREAM);
   });
 
   describe('>instance', () => {

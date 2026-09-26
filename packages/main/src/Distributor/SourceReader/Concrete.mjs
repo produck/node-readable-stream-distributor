@@ -15,8 +15,6 @@ export default class SourceReader {
     }
 
     this[I.STREAM] = stream;
-    // TODO: review a foreign getReader() that throws: the locked check above
-    //   does not guarantee it succeeds, and it escapes this constructor.
     this[I.READER] = stream.getReader();
   }
 

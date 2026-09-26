@@ -39,8 +39,10 @@
 
 （临时文件目录等存储要素不属分发器职责，由降级策略/子类自管。）
 
-构造条件：`source` 必须为未被锁定的 WHATWG `ReadableStream`
-（`source.locked === false`），否则拒绝构造。
+构造条件：`source` 必须为**本 realm** 的、未被锁定的 WHATWG
+`ReadableStream`（`source instanceof ReadableStream` 且 `source.locked ===
+false`），否则拒绝构造。跨 realm（iframe / worker / 另一 `vm` 上下文）的流
+不直接接受：先经适配层转成本地 `ReadableStream` 再传入。
 
 ```js
 import { ReadableStreamDistributor } from '@produck/readable-stream-distributor';
